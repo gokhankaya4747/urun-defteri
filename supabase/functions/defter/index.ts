@@ -28,7 +28,6 @@ Deno.serve(async (req) => {
     if (action === "haftalik") return json(await doHaftalik(req));
     if (action === "oku") return json(await doOku(req));
     if (action === "cumle") return json(await doCumle(req));
-    if (action === "cumle-test") return json(await cumleTest()); // GEÇİCİ
     if (action === "push-key") return json({ key: (await vapid()).pub });
     if (action === "push-test") return json(await doPushTest(req));
     if (action === "push-kayit") return json(await doPushKayit(req));
@@ -420,7 +419,7 @@ Kayıt türü (kind):
 - pay_in: müşteriden ya da ortaktan para geldi ("tahsil ettim", "para geldi", "yatırdı").
 - exp: masraf ödedik (gümrük, TIR navlunu, gümrükçü, nakliye, ilaçlama, liman vb.).
 - belirsiz: hangisi olduğu anlaşılmıyorsa; warnings'e nedenini yaz.
-Firmalarımız: a = ${ctx.firms?.[0] || "Asya Çerez"}, b = ${ctx.firms?.[1] || "Gökhan Altın"}. Cümlede firma geçmiyorsa firm boş.
+Firmalarımız: a = ${ctx.firms?.[0] || "Asya Çerez"}, b = ${ctx.firms?.[1] || "Gökhan Altın"}. Cümlede firma geçmiyorsa firm boş bırak ve bunun için uyarı YAZMA (firma bağlı alımdan/satıştan bulunur).
 Ürünler (Türkçe katalog adıyla yaz): ${(ctx.products || []).join(", ")}. Modeller: ${JSON.stringify(ctx.models || {})}. "W320", "23/25" gibi kalibreler model alanına.
 Miktar: ton ×1000 kg; "6 ton" = 6000. Fiyat her zaman kg başına: "tonu 8600 dolar" → 8.6; "kilosu 8,6" → 8.6. Türkçe sayılarda nokta binlik, virgül ondalıktır ("410.800" = 410800, "8,6" = 8.6). "bin", "milyon" kelimelerini sayıya çevir.
 Para birimi: dolar/$ → USD, TL/lira/₺ → TL, euro → EUR. Söylenmediyse boş.
@@ -436,7 +435,7 @@ Açık satışlar:
 ${L(ctx.sales)}
 Alımlar:
 ${L(ctx.lots)}
-Plaka, fatura/belge no, vade gibi bilgileri ilgili alanlara; geri kalan önemli ayrıntıyı note'a kısa yaz.
+Plaka, fatura/belge no, vade gibi bilgileri ilgili alanlara yaz; note'a sadece hiçbir alana sığmayan önemli ayrıntıyı yaz (alanlara yazdığını tekrar etme, yoksa boş bırak). Tarih söylenmediyse bugünü yaz ve uyarı yapma.
 Sadece cümlede olanı aktar, uydurma. Eksik ya da belirsiz olan her şeyi warnings'e kısa Türkçe cümleyle yaz (ör. "Fiyat söylenmedi", "Hangi bankadan gönderildiği yazılmadı" gibi — ama banka yazılmadıysa bunu uyarı yapma, isteğe bağlı).`;
   const client = new Anthropic({ apiKey: key });
   const resp: any = await client.beta.messages.create({
@@ -453,19 +452,6 @@ Sadece cümlede olanı aktar, uydurma. Eksik ya da belirsiz olan her şeyi warni
   let data;
   try { data = JSON.parse(out); } catch { throw new HttpError(502, "Beklenmeyen bir yanıt geldi, tekrar dene."); }
   return { ok: true, data, model: resp.model };
-}
-
-async function cumleTest() { // GEÇİCİ canlı deneme
-  const ctx = { firms: ["Asya Çerez", "Gökhan Altın"], products: ["Kaju", "Badem", "Ceviz", "Yer fıstığı", "Kahve", "Çekirdek", "Fındık"], models: { Kaju: ["W320", "W240"], Badem: ["Nonpareil 23/25"] },
-    expcats: ["Irak gümrüğü", "TIR navlunu (Mersin yükleme)", "Gümrükçü (müşavir)", "İhracat masrafı", "Diğer"], banks: ["Ziraat Bankası", "Garanti BBVA", "İş Bankası"],
-    customers: ["Karwan Trading (Erbil)", "Al-Noor (Bağdat)", "Mersin Kuruyemiş"], suppliers: ["Vinacas Export (Vietnam)", "Blue Diamond (ABD)"],
-    sales: ["s:S1 · satış 6 Eki 2026 · Al-Noor (Bağdat) · Irak · Kaju W320 6.000 kg · kalan alacak $51.600", "s:S2 · satış 2 Eki 2026 · Karwan Trading (Erbil) · Irak · Badem Nonpareil 23/25 4.000 kg · kalan alacak $30.000"],
-    lots: ["l:L1 · alım A26-001 · Kaju · Vinacas Export (Vietnam) · Mersin SB · tedarikçiye kalan borç $98.784 · Asya Çerez", "l:L2 · alım A26-002 · Badem · Blue Diamond (ABD) · Yolda · tedarikçiye kalan borç $42.000 · Gökhan Altın"] };
-  const S = ["Bağdat'taki Al-Noor'a 6 ton W320 kaju sattım, tonu 8600 dolar, 30 gün vadeli, 34 ABC 123 plakalı tır", "Badem tedarikçisine Garanti'den 42 bin dolar bakiye gönderdim", "Karwan 30.000 dolar yatırdı Ziraat'e geldi", "dünkü bağdat satışı için ırak gümrüğüne 1.850 dolar ödedik", "merhaba nasılsın"];
-  const key = Deno.env.get("ANTHROPIC_API_KEY")!;
-  const t0 = Date.now();
-  const out = await Promise.all(S.map(async (x) => { const a = Date.now(); try { return { x, ms: Date.now() - a, ...(await cumleCore(x, ctx, key)), ms2: Date.now() - a }; } catch (e) { return { x, err: String(e) }; } }));
-  return { toplamMs: Date.now() - t0, out };
 }
 
 /* ---------- 5) telefona bildirim (Web Push, RFC 8291 + VAPID RFC 8292, harici kütüphanesiz) ---------- */
