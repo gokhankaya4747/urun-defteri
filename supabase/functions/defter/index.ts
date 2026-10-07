@@ -2,6 +2,7 @@
 //   ?action=kur       TCMB USD/EUR kurlarını çeker, settings/kurlar belgesine yazar (pg_cron her iş günü)
 //   ?action=haftalik  Haftalık özet (tüm kullanıcılara) + yedek (sahibe) e-postası (pg_cron pazartesi)
 //   ?action=oku       Fatura / dekont / makbuz görselini Claude ile okuyup forma doldurulacak bilgiyi döndürür
+//   ?action=cumle     "Ahmet'e 6 ton W320 sattım kilosu 8,6$" gibi tek cümleyi satış / ödeme / masraf formuna çevirir
 // Gizli anahtarlar (Supabase → Edge Functions → Secrets): ANTHROPIC_API_KEY, GMAIL_APP_PASSWORD (veya RESEND_API_KEY)
 import { createClient } from "npm:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk";
@@ -26,6 +27,8 @@ Deno.serve(async (req) => {
     if (action === "kur") return json(await doKur(req));
     if (action === "haftalik") return json(await doHaftalik(req));
     if (action === "oku") return json(await doOku(req));
+    if (action === "cumle") return json(await doCumle(req));
+    if (action === "cumle-test") return json(await cumleTest()); // GEÇİCİ
     if (action === "push-key") return json({ key: (await vapid()).pub });
     if (action === "push-test") return json(await doPushTest(req));
     if (action === "push-kayit") return json(await doPushKayit(req));
@@ -370,6 +373,99 @@ Kurallar:
   let data;
   try { data = JSON.parse(text); } catch { throw new HttpError(502, "Belge okunurken beklenmeyen bir yanıt geldi, tekrar dene."); }
   return { ok: true, data, model: resp.model };
+}
+
+/* ---------- 4b) tek cümleden kayıt (Claude) ---------- */
+const CUMLE_SCHEMA = {
+  type: "object", additionalProperties: false,
+  required: ["kind", "firm", "date", "currency", "party", "market", "items", "amount", "bank", "pay_kind", "expense_category", "link_ref", "due_date", "doc_no", "plate", "note", "warnings"],
+  properties: {
+    kind: { type: "string", enum: ["sale", "pay_out", "pay_in", "exp", "belirsiz"] },
+    firm: { type: "string", enum: ["a", "b", ""] },
+    date: { type: "string", description: "YYYY-MM-DD; söylenmediyse bugün" },
+    currency: { type: "string", enum: ["USD", "TL", "EUR", ""] },
+    party: { type: "string", description: "satışta/tahsilatta müşteri, ödemede tedarikçi, masrafta parayı alan kişi/firma" },
+    market: { type: "string", enum: ["irak", "ic", "diger", ""] },
+    items: { type: "array", items: { type: "object", additionalProperties: false, required: ["product", "model", "quantity_kg", "unit_price_per_kg"],
+      properties: { product: { type: "string" }, model: { type: "string" }, quantity_kg: { type: "number" }, unit_price_per_kg: { type: "number" } } } },
+    amount: { type: "number", description: "ödeme/tahsilat/masraf tutarı; satışta söylenen toplam (yoksa 0)" },
+    bank: { type: "string" },
+    pay_kind: { type: "string" },
+    expense_category: { type: "string" },
+    link_ref: { type: "string", description: "verilen listedeki ref (s:… ya da l:…) ya da boş" },
+    due_date: { type: "string", description: "vade tarihi YYYY-MM-DD ya da boş" },
+    doc_no: { type: "string" },
+    plate: { type: "string" },
+    note: { type: "string" },
+    warnings: { type: "array", items: { type: "string" } },
+  },
+};
+async function doCumle(req: Request) {
+  const me = await caller(req);
+  if (!me || me.role === "viewer") throw new HttpError(401, "Giriş yapmış ve kayıt girebilen bir kullanıcı olmalısın.");
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) throw new HttpError(503, "Yapay zekâ henüz açılmadı (ANTHROPIC_API_KEY eklenmemiş).");
+  const { text, context } = await req.json().catch(() => ({}));
+  const t = String(text || "").trim().slice(0, 1500);
+  if (t.length < 4) throw new HttpError(400, "Bir cümle yaz.");
+  return await cumleCore(t, context || {}, key);
+}
+async function cumleCore(t: string, ctx: any, key: string) {
+  const L = (a: unknown, n = 80) => (Array.isArray(a) ? a.slice(0, n).map((x) => String(x).slice(0, 160)).join("\n") : "");
+  const system = `Sen Mersin Serbest Bölge'de kuruyemiş ticareti yapan bir firmanın ön muhasebe asistanısın. Kullanıcı (patron ya da personel) yaptığı bir işi tek cümleyle, günlük Türkçeyle yazar; sen bunu şemaya aktarırsın. Kullanıcı formu görüp kontrol ettikten sonra kaydeder.
+Bugün: ${todayTR()} (Türkiye saati). "dün", "geçen salı", "30 gün vadeli" gibi göreli ifadeleri bu tarihe göre hesapla.
+Kayıt türü (kind):
+- sale: biz mal sattık ("sattım", "verdim", "yükledik gönderdik").
+- pay_out: tedarikçiye para gönderdik ("ödedim", "gönderdim", "havale yaptım", "ön ödeme").
+- pay_in: müşteriden ya da ortaktan para geldi ("tahsil ettim", "para geldi", "yatırdı").
+- exp: masraf ödedik (gümrük, TIR navlunu, gümrükçü, nakliye, ilaçlama, liman vb.).
+- belirsiz: hangisi olduğu anlaşılmıyorsa; warnings'e nedenini yaz.
+Firmalarımız: a = ${ctx.firms?.[0] || "Asya Çerez"}, b = ${ctx.firms?.[1] || "Gökhan Altın"}. Cümlede firma geçmiyorsa firm boş.
+Ürünler (Türkçe katalog adıyla yaz): ${(ctx.products || []).join(", ")}. Modeller: ${JSON.stringify(ctx.models || {})}. "W320", "23/25" gibi kalibreler model alanına.
+Miktar: ton ×1000 kg; "6 ton" = 6000. Fiyat her zaman kg başına: "tonu 8600 dolar" → 8.6; "kilosu 8,6" → 8.6. Türkçe sayılarda nokta binlik, virgül ondalıktır ("410.800" = 410800, "8,6" = 8.6). "bin", "milyon" kelimelerini sayıya çevir.
+Para birimi: dolar/$ → USD, TL/lira/₺ → TL, euro → EUR. Söylenmediyse boş.
+Pazar (satışta): Irak'taki müşteri → irak, Türkiye içi → ic, başka ülke → diger. Müşterinin bilinen pazarı yoksa şehir/ülkeye bak (Bağdat, Erbil, Basra, Musul, Süleymaniye, Duhok, Zaho = Irak).
+party alanına kişiyi/firmayı bu listelerdeki yazımıyla yaz (en yakın eşleşme); listede yoksa cümledeki adı yaz.
+Müşteriler: ${(ctx.customers || []).join(", ")}
+Tedarikçiler: ${(ctx.suppliers || []).join(", ")}
+Bankalar (bank alanı için bu yazımla): ${(ctx.banks || []).join(", ")}
+Masraf türleri (expense_category bu listeden): ${(ctx.expcats || []).join(", ")}
+Ödeme türü (pay_kind): tedarikçiye ödemede "Ön ödeme", "Ara ödeme" ya da "Bakiye"; tahsilatta "Tahsilat" ya da ortaktan geliyorsa "Ortak hesap havalesi". Söylenmediyse boş.
+link_ref: ödeme/tahsilat/masraf hangi satışa ya da alıma aitse aşağıdaki listeden ref'ini yaz (ör. "s:abc", "l:xyz"). Sadece cümleden açıkça anlaşılıyorsa yaz (müşteri/tedarikçi + ürün + tarih uyuyorsa); emin değilsen boş bırak.
+Açık satışlar:
+${L(ctx.sales)}
+Alımlar:
+${L(ctx.lots)}
+Plaka, fatura/belge no, vade gibi bilgileri ilgili alanlara; geri kalan önemli ayrıntıyı note'a kısa yaz.
+Sadece cümlede olanı aktar, uydurma. Eksik ya da belirsiz olan her şeyi warnings'e kısa Türkçe cümleyle yaz (ör. "Fiyat söylenmedi", "Hangi bankadan gönderildiği yazılmadı" gibi — ama banka yazılmadıysa bunu uyarı yapma, isteğe bağlı).`;
+  const client = new Anthropic({ apiKey: key });
+  const resp: any = await client.beta.messages.create({
+    model: "claude-opus-5-5",
+    max_tokens: 4000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: { effort: "low", format: { type: "json_schema", schema: CUMLE_SCHEMA } },
+    system,
+    messages: [{ role: "user", content: t }],
+  } as any);
+  if (resp.stop_reason === "refusal") throw new HttpError(422, "Cümle anlaşılamadı.");
+  const out = (resp.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+  let data;
+  try { data = JSON.parse(out); } catch { throw new HttpError(502, "Beklenmeyen bir yanıt geldi, tekrar dene."); }
+  return { ok: true, data, model: resp.model };
+}
+
+async function cumleTest() { // GEÇİCİ canlı deneme
+  const ctx = { firms: ["Asya Çerez", "Gökhan Altın"], products: ["Kaju", "Badem", "Ceviz", "Yer fıstığı", "Kahve", "Çekirdek", "Fındık"], models: { Kaju: ["W320", "W240"], Badem: ["Nonpareil 23/25"] },
+    expcats: ["Irak gümrüğü", "TIR navlunu (Mersin yükleme)", "Gümrükçü (müşavir)", "İhracat masrafı", "Diğer"], banks: ["Ziraat Bankası", "Garanti BBVA", "İş Bankası"],
+    customers: ["Karwan Trading (Erbil)", "Al-Noor (Bağdat)", "Mersin Kuruyemiş"], suppliers: ["Vinacas Export (Vietnam)", "Blue Diamond (ABD)"],
+    sales: ["s:S1 · satış 6 Eki 2026 · Al-Noor (Bağdat) · Irak · Kaju W320 6.000 kg · kalan alacak $51.600", "s:S2 · satış 2 Eki 2026 · Karwan Trading (Erbil) · Irak · Badem Nonpareil 23/25 4.000 kg · kalan alacak $30.000"],
+    lots: ["l:L1 · alım A26-001 · Kaju · Vinacas Export (Vietnam) · Mersin SB · tedarikçiye kalan borç $98.784 · Asya Çerez", "l:L2 · alım A26-002 · Badem · Blue Diamond (ABD) · Yolda · tedarikçiye kalan borç $42.000 · Gökhan Altın"] };
+  const S = ["Bağdat'taki Al-Noor'a 6 ton W320 kaju sattım, tonu 8600 dolar, 30 gün vadeli, 34 ABC 123 plakalı tır", "Badem tedarikçisine Garanti'den 42 bin dolar bakiye gönderdim", "Karwan 30.000 dolar yatırdı Ziraat'e geldi", "dünkü bağdat satışı için ırak gümrüğüne 1.850 dolar ödedik", "merhaba nasılsın"];
+  const key = Deno.env.get("ANTHROPIC_API_KEY")!;
+  const t0 = Date.now();
+  const out = await Promise.all(S.map(async (x) => { const a = Date.now(); try { return { x, ms: Date.now() - a, ...(await cumleCore(x, ctx, key)), ms2: Date.now() - a }; } catch (e) { return { x, err: String(e) }; } }));
+  return { toplamMs: Date.now() - t0, out };
 }
 
 /* ---------- 5) telefona bildirim (Web Push, RFC 8291 + VAPID RFC 8292, harici kütüphanesiz) ---------- */

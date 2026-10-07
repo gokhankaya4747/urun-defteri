@@ -202,7 +202,7 @@ function render(){
   m.innerHTML=h;
   fillNames(m); window.__blobHook?.(m);
   const top=S.stack[S.stack.length-1];
-  if(top && !["form","scan","pdf","notify"].includes(top.type)) renderSheet();
+  if(top && !["form","scan","pdf","notify","choose"].includes(top.type)) renderSheet();
   if(!S.hashDone && S.lots.length && location.hash.length>2){ if(handleHash()) S.hashDone=true; }
 }
 const prodChips = () => `<div class="chips" role="group" aria-label="Ürün"><button type="button" class="chip" data-prod="all" aria-pressed="${S.prod==="all"}">Tüm ürünler</button>${prodList().map(p=>`<button type="button" class="chip" data-prod="${esc(p.id)}" aria-pressed="${S.prod===p.id}">${esc(p.name)}</button>`).join("")}</div>`;
@@ -603,7 +603,14 @@ function sProd(pid){
 /* --- ekle seçici --- */
 function sChoose(){
   const b=(act,ic,t,s)=>`<button type="button" data-act="${act}">${svg(ic,28)}<div><b>${t}</b><span>${s}</span></div></button>`;
-  return {title:"Ne eklemek istiyorsun?",body:`<div class="chooser">
+  const quick = window.__fn&&canWrite ? `<div class="quick">
+    <label for="qtext"><b>${svg(IC_SPARK,16)}Yazarak gir</b><span>Satışı, ödemeyi, tahsilatı ya da masrafı bir cümleyle yaz; form dolu gelir, sen kontrol edip kaydedersin.</span></label>
+    <textarea id="qtext" rows="3" enterkeyhint="go" placeholder="Örn: Bağdat'taki Ahmet'e 6 ton W320 kaju sattım, kilosu 8,6 dolar, 30 gün vadeli">${esc(S.qtext||"")}</textarea>
+    <div class="qrow"><button class="btn pri" type="button" data-act="quick-go">Forma çevir</button><span class="hint">Klavyedeki mikrofona basıp konuşarak da yazabilirsin.</span></div>
+    <details class="qex"><summary>Örnekler (dokununca kutuya yazılır)</summary><ul>
+      ${["Kaju tedarikçisine Ziraat'ten 42 bin dolar bakiye gönderdim","Erbil'deki Karwan 30 bin dolar yatırdı, Garanti'ye geldi","Dünkü Basra satışı için Irak gümrüğüne 1.850 dolar ödedik","34 ABC 123 plakalı TIR'ın Mersin yükleme navlunu 18.500 TL"].map(x=>`<li><button type="button" class="linkbtn" data-act="quick-ex">${esc(x)}</button></li>`).join("")}
+    </ul></details></div><div class="qor"><span>ya da türünü seç</span></div>` : "";
+  return {title:"Ne eklemek istiyorsun?",body:`${quick}<div class="chooser">
     ${b("new-lot",'<rect x="2" y="6" width="20" height="13" rx="1.5"/><path d="M7 9v7M12 9v7M17 9v7"/>',"Yeni alım","Yurtdışından sipariş verdiğin mal; ortak alım da buradan")}
     ${b("new-pay-out",'<path d="M12 19V5M5 12l7-7 7 7"/>',"Tedarikçiye ödeme","Ön ödeme, ara ödeme ya da bakiye")}
     ${b("new-sale",'<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',"Satış","Irak'a, iç piyasaya ya da ihracat")}
@@ -694,7 +701,8 @@ async function fileForAI(f){
   return {mediaType:"application/pdf",data:btoa(bin)};
 }
 function aiNoteHTML(ai){
-  return `<div class="ainote" role="status"><div class="ai-h">${svg(IC_SPARK,16)}<b>Belgeden dolduruldu</b><span class="muted">Kaydetmeden önce kontrol et.</span></div>
+  return `<div class="ainote" role="status"><div class="ai-h">${svg(IC_SPARK,16)}<b>${ai.src==="cumle"?"Yazdığından dolduruldu":"Belgeden dolduruldu"}</b><span class="muted">Kaydetmeden önce kontrol et.</span></div>
+    ${ai.text?`<div class="ai-q">“${esc(ai.text)}”</div>`:""}
     ${ai.filled.length?`<div class="ai-f">${ai.filled.map(x=>`<span>${esc(x)}</span>`).join("")}</div>`:""}
     ${ai.warn.length?`<ul>${ai.warn.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:""}
     ${ai.party?`<button class="btn sm" type="button" data-act="ai-party">+ ${esc(ai.party.name)} firmasını bilgileriyle ekle</button>`:""}</div>`;
@@ -756,6 +764,51 @@ function applyAI(top,d){
   }
   if(!filled.length) warn.unshift("Belgeden kullanılabilir bilgi çıkarılamadı. Fotoğrafı daha net ve düz çekmeyi dene.");
   return {filled,warn,party};
+}
+/* --- tek cümleden kayıt --- */
+function quickContext(){
+  const sales=S.sales.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).filter((x,i)=>i<40||SC(x).due>1).slice(0,70)
+    .map(x=>{ const c=SC(x); return `s:${x.id} · satış ${fd(x.date)} · ${saleCustomer(x)} · ${MK[x.market]||""} · ${saleLinesTxt(x)}${c.olot?" · ortak alım malı":c.due>1?" · kalan alacak "+usdf(c.due):" · tahsil edildi"}`; });
+  const lots=S.lots.slice().sort((a,b)=>String(b.code).localeCompare(String(a.code))).filter((l,i)=>i<40||l.status!=="kapandi"||LC(l).due>1).slice(0,70)
+    .map(l=>{ const c=LC(l); return `l:${l.id} · alım ${l.code} · ${lotProducts(l)} · ${lotSupplier(l)} · ${ST[STI[l.status]]?.t||l.status}${c.due>1?" · tedarikçiye kalan borç "+usdf(c.due):""}${l.ortak?.on?` · ORTAK ALIM (ortak: ${partyName(l.ortak.partnerId)}${c.odue>1?", ortaktan alacak "+usdf(c.odue):""})`:` · ${firmName(l.firmId)}`}`; });
+  return {firms:[firmName("a"),firmName("b")],products:productsSorted().map(p=>p.name),models:Object.fromEntries(productsSorted().map(p=>[p.name,modelsOf(p.id)])),
+    expcats:lists("expcats"),banks:lists("banks"),customers:partiesOf("customer").map(p=>p.name),suppliers:partiesOf("supplier").map(p=>p.name),sales,lots};
+}
+async function quickGo(btn){
+  const ta=document.getElementById("qtext"); const txt=(ta?.value||"").trim(); S.qtext=ta?.value||"";
+  if(txt.length<4){ ta?.focus(); return toast("Önce ne yaptığını bir cümleyle yaz."); }
+  btn.disabled=true; const old=btn.textContent; btn.textContent="Anlıyorum… (5–15 sn)"; ta.disabled=true;
+  let d;
+  try{ d=(await window.__fn("cumle",{text:txt,context:quickContext()})).data; }
+  catch(e){ btn.disabled=false; btn.textContent=old; ta.disabled=false; return toast(e?.message||"Anlaşılamadı. Tekrar dene."); }
+  if(S.stack[S.stack.length-1]?.type!=="choose") return;
+  if(!d||d.kind==="belirsiz"){ btn.disabled=false; btn.textContent=old; ta.disabled=false; return toast((d?.warnings||[])[0]||"Satış mı, ödeme mi, masraf mı anlaşılmadı. Biraz daha açık yaz."); }
+  S.stack.pop();
+  const ref=String(d.link_ref||""), refSale=ref.startsWith("s:")&&saleById(ref.slice(2))?ref.slice(2):"", refLot=ref.startsWith("l:")&&lotById(ref.slice(2))?ref.slice(2):"";
+  const kind=d.kind==="sale"?"sale":d.kind==="exp"?"exp":"pay";
+  if(kind==="sale") saleForm(null);
+  else if(kind==="exp") expForm(null,{...(d.firm?{firmId:d.firm}:{}),...(refSale?{link:"sale",saleId:refSale}:refLot?{link:"lot",lotId:refLot}:{})});
+  else if(d.kind==="pay_out") payForm(null,{dir:"out",...(d.pay_kind?{kind:d.pay_kind}:{}),...(d.firm?{firmId:d.firm}:{}),...(refLot?{lotId:refLot}:{})});
+  else payForm(null,{dir:"in",kind:d.pay_kind||(refLot?"Ortak hesap havalesi":"Tahsilat"),...(d.firm?{firmId:d.firm}:{}),...(refSale?{target:"s:"+refSale}:refLot&&lotById(refLot).ortak?.on?{target:"l:"+refLot}:{})});
+  const top=S.stack[S.stack.length-1]; if(top?.type!=="form") return;
+  const its=(d.items||[]).map(it=>({product:it.product,model:it.model,description:"",quantity_kg:it.quantity_kg,unit_price_per_kg:it.unit_price_per_kg,amount:0}));
+  const doc={date:d.date,invoice_no:d.doc_no,currency:d.currency,warnings:d.warnings||[],items:its,total_amount:d.amount,expense_category:d.expense_category,
+    seller:{name:kind==="exp"?d.party:""},buyer:{name:kind==="sale"?d.party:"",country:""},
+    payment:{direction:kind==="pay"?(d.kind==="pay_out"?"out":"in"):"",amount:d.amount,date:d.date,bank:d.bank,sender:d.kind==="pay_in"?d.party:"",receiver:d.kind==="pay_out"?d.party:"",reference:""}};
+  if(kind==="pay"&&((d.kind==="pay_out"&&top.v.lotId)||(d.kind==="pay_in"&&top.v.target))) doc.payment[d.kind==="pay_out"?"receiver":"sender"]="";
+  const ai=applyAI(top,doc), v=top.v;
+  if(kind==="sale"){
+    if(d.market){ v.market=d.market; ai.filled.push("pazar"); }
+    else { const cp=S.parties[v.customerId]; const c=key(cp?.country); if(c) v.market=/irak/.test(c)?"irak":/türkiye/.test(c)?"ic":"diger"; }
+    if(d.due_date){ v.dueDate=d.due_date; ai.filled.push("vade"); }
+    if(d.plate){ v.plate=d.plate; ai.filled.push("plaka"); }
+    if(!its.some(it=>it.unit_price_per_kg>0)&&its.length) ai.warn.push("Fiyat yazılmadı; kalemlere fiyat gir.");
+  }
+  if(kind==="pay"){ if(refLot||refSale) ai.filled.push(refLot?`alım ${lotById(refLot).code}`:"satış"); if(d.pay_kind) ai.filled.push("ödeme türü"); }
+  if(kind==="exp"){ if(refSale||refLot) ai.filled.push(refSale?"bağlı satış":`alım ${lotById(refLot).code}`); else ai.warn.push("Masrafın hangi satışa ya da alıma ait olduğunu seç (genel masrafsa “Genel”)."); }
+  if(d.note) v.note=[v.note,d.note].filter(Boolean).join("\n");
+  ai.warn=ai.warn.map(w=>/^Belgeden kullanılabilir bilgi/.test(w)?"Cümleden forma aktarılacak bilgi çıkmadı. Kim, ne, ne kadar gibi ayrıntıları ekleyip tekrar dene.":w);
+  ai.src="cumle"; ai.text=txt; top.ai=ai; top.v={...v}; S.qtext=""; renderSheet();
 }
 function aiAddParty(){
   const top=S.stack[S.stack.length-1]; const pr=top?.ai?.party; if(!pr) return;
@@ -1022,7 +1075,7 @@ async function addModels(items){
 function nextCode(d){ const yy=(d||today()).slice(2,4); const n=S.lots.map(l=>String(l.code||"")).filter(c=>/^[AP]\d\d-/.test(c)&&c.slice(1,3)===yy).map(c=>parseInt(c.slice(4),10)||0); return `A${yy}-${String((n.length?Math.max(...n):0)+1).padStart(3,"0")}`; }
 
 /* --- satış formu --- */
-const saleOrtakLot = x => { for(const r of (x.items||[])){ const ci=r.ref&&C.item.get(r.ref); if(ci?.lot.ortak?.on) return ci.lot; } return null; };
+const saleOrtakLot = x => { for(const r of (x.items||[])){ const ci=r.ref?C.item.get(r.ref):null; if(ci?.lot?.ortak?.on) return ci.lot; } return null; };
 function saleForm(s,lotId){
   const isNew=!s;
   let v;
@@ -1792,6 +1845,8 @@ document.addEventListener("click",e=>{
       if(a==="list-add") arr.push(""); else { arr.splice(+d.i,1); if(!arr.length) arr.push(""); } top.v[d.k]=arr; if(top.v.cnt!==undefined&&d.k==="cntNos") top.v.cnt=arr.filter(Boolean).length||arr.length;
       renderSheet(); if(a==="list-add"){ const ins=document.querySelectorAll(`.mlist[data-k="${d.k}"] input`); ins[ins.length-1]?.focus(); } return; }
     if(a==="ai-fill") return aiFill(t);
+    if(a==="quick-go") return quickGo(t);
+    if(a==="quick-ex"){ const ta=document.getElementById("qtext"); if(ta){ ta.value=t.textContent; S.qtext=ta.value; ta.focus(); } return; }
     if(a.startsWith("pdf-")&&a!=="pdf-invoice"&&a!=="pdf-statement") return pdfAct(a,t);
     if(a==="ai-party") return aiAddParty();
     if(a==="ffile-del"){ const top=S.stack[S.stack.length-1]; top.v={...top.v,...readForm()}; top.v.__files=(top.v.__files||[]).filter((_,i)=>i!==+d.i); renderSheet(); return; }

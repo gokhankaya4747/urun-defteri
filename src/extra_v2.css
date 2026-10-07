@@ -106,3 +106,19 @@ td.dim{color:var(--muted)}
 .ainote .ai-f span{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--surface);border:1px solid var(--line)}
 .ainote ul{margin:0;padding-left:18px;color:var(--warn)}
 .ainote .btn{align-self:flex-start;white-space:normal;text-align:left;max-width:100%}
+/* tek cümleden kayıt */
+.quick{display:flex;flex-direction:column;gap:8px;border:1px solid color-mix(in srgb,var(--firm-b) 45%,var(--line));background:color-mix(in srgb,var(--firm-b) 6%,var(--surface));border-radius:var(--r);padding:14px}
+.quick label{display:flex;flex-direction:column;gap:2px}
+.quick label b{display:flex;align-items:center;gap:6px;font-size:16px}
+.quick label b svg{color:var(--firm-b)}
+.quick label span{font-size:13px;color:var(--muted)}
+.quick textarea{width:100%;min-height:84px;resize:vertical;font:inherit;font-size:16px;line-height:1.4;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg)}
+.quick textarea:focus{outline:2px solid var(--firm-b);outline-offset:0;border-color:transparent}
+.quick .qrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.quick .qex{font-size:13px;color:var(--muted)}
+.quick .qex summary{cursor:pointer}
+.quick .qex ul{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+.qor{display:flex;align-items:center;gap:10px;margin:14px 0 10px;color:var(--muted);font-size:13px}
+.qor::before,.qor::after{content:"";flex:1;height:1px;background:var(--line)}
+.ainote .ai-q{font-size:13px;color:var(--muted);font-style:italic;overflow-wrap:anywhere}
+.quick .linkbtn{all:unset;cursor:pointer;color:var(--fg);text-decoration:underline dotted;text-underline-offset:3px}
