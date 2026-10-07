@@ -26,7 +26,6 @@ Deno.serve(async (req) => {
     if (action === "kur") return json(await doKur(req));
     if (action === "haftalik") return json(await doHaftalik(req));
     if (action === "oku") return json(await doOku(req));
-    if (action === "oku-test") return json(await okuTest());
     return json({ error: "bilinmeyen işlem" }, 400);
   } catch (e) {
     console.error(action, e);
@@ -366,24 +365,4 @@ Kurallar:
   let data;
   try { data = JSON.parse(text); } catch { throw new HttpError(502, "Belge okunurken beklenmeyen bir yanıt geldi, tekrar dene."); }
   return { ok: true, data, model: resp.model };
-}
-
-/* geçici öz-test: sabit bir örnek fatura metniyle okuma zincirini dener (günde en fazla 5 kez) */
-async function okuTest() {
-  const st = (await getDoc("settings", "okutest")) || {}; const day = todayTR();
-  if (st.day === day && st.n >= 5) throw new HttpError(429, "Bugünkü test hakkı doldu.");
-  await putDoc("settings", "okutest", { day, n: st.day === day ? st.n + 1 : 1 });
-  const key = Deno.env.get("ANTHROPIC_API_KEY"); if (!key) throw new HttpError(503, "ANTHROPIC_API_KEY yok");
-  const client = new Anthropic({ apiKey: key });
-  const text = "COMMERCIAL INVOICE No: VN-TEST-001  Date: 02/10/2026\nSeller: Saigon Test Nuts Co., Ltd, Ho Chi Minh City, Vietnam, Tel +84 28 0000 0000\nBuyer: Asya Cerez Dis Ticaret Ltd, Mersin Free Zone, Turkey\nCashew Kernels W320  15.876 MT  USD 6,950/MT  Amount USD 110,338.20\nTerms: CIF Mersin. Container: MSCU1234567  B/L: MEDU9988776  Vessel: MSC TEST V.123";
-  const t0 = Date.now();
-  const resp: any = await client.beta.messages.create({
-    model: "claude-opus-5-5", max_tokens: 16000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
-    output_config: { effort: "medium", format: { type: "json_schema", schema: OKU_SCHEMA } },
-    system: "Ticari belgedeki bilgileri şemaya aktar. Miktarları kg'a, fiyatı kg başına çevir. Tarih YYYY-MM-DD.",
-    messages: [{ role: "user", content: [{ type: "document", source: { type: "text", media_type: "text/plain", data: text } }, { type: "text", text: "Belgeyi şemaya aktar." }] }],
-  } as any);
-  const out = (resp.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
-  const d = JSON.parse(out);
-  return { ok: true, sn: (Date.now() - t0) / 1000, model: resp.model, stop: resp.stop_reason, usage: resp.usage, ozet: { tarih: d.date, no: d.invoice_no, satici: d.seller?.name, kalem: d.items?.map((i: any) => `${i.product} ${i.model} ${i.quantity_kg}kg @${i.unit_price_per_kg}`), konteyner: d.shipping?.container_nos, bl: d.shipping?.bl_no } };
 }
