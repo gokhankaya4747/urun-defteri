@@ -26,7 +26,7 @@ const errText = e => {
 let mode = "login";
 function authView(m, info) {
   mode = m; const box = $("authbox"); $("auth").hidden = false;
-  const email = $("a_email")?.value || "";
+  const email = $("a_email")?.value || savedEmail();
   const T = {
     login: ["Giriş yap", "Ürün Defteri'ne e-postan ve şifrenle gir."],
     signup: ["Hesap oluştur", "Defterin sahibi seni Kullanıcılar listesine eklediyse, aynı e-postayla burada şifreni belirle."],
@@ -51,7 +51,7 @@ function authView(m, info) {
     <div class="a-links">${m === "login" ? `<button type="button" data-m="signup">Hesap oluştur</button><button type="button" data-m="reset">Şifremi unuttum</button>` : m !== "newpass" ? `<button type="button" data-m="login">Giriş ekranına dön</button>` : ""}</div>`;
   box.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => authView(b.dataset.m)));
   $("a_form").addEventListener("submit", onAuthSubmit);
-  setTimeout(() => (m === "newpass" ? $("a_pass") : $("a_email"))?.focus(), 30);
+  setTimeout(() => (m === "newpass" || ($("a_email")?.value && m === "login") ? $("a_pass") : $("a_email"))?.focus(), 30);
 }
 const authErr = t => { const e = $("a_err"); e.textContent = t; e.hidden = false; };
 async function onAuthSubmit(ev) {
@@ -63,7 +63,7 @@ async function onAuthSubmit(ev) {
   go.disabled = true; const old = go.textContent; go.textContent = "Bekle…";
   try {
     const back = location.origin + location.pathname;
-    if (mode === "login") { const { error } = await sb.auth.signInWithPassword({ email, password: p1 }); if (error) throw error; }
+    if (mode === "login") { const { error } = await sb.auth.signInWithPassword({ email, password: p1 }); if (error) throw error; rememberEmail(email); }
     else if (mode === "signup") { const { error } = await sb.auth.signUp({ email, password: p1, options: { emailRedirectTo: back } }); if (error) throw error;
       return authView("sent", `<b>${email}</b> adresine bir doğrulama bağlantısı gönderdik. E-postadaki bağlantıya dokun, sonra buradan giriş yap. E-posta birkaç dakika içinde gelmezse gereksiz (spam) klasörüne bak.`); }
     else if (mode === "reset") { const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: back }); if (error) throw error;
@@ -78,7 +78,20 @@ if (!CFG.url || !CFG.key || !window.supabase) {
   document.addEventListener("DOMContentLoaded", () => authView("setup", "Kurulum henüz tamamlanmadı: veritabanı bağlantı bilgileri eklenmedi."));
   return;
 }
-const sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+const sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: "urun-defteri-oturum" } });
+const rememberEmail = e => { try { localStorage.setItem("ud.email", e); } catch (_) {} };
+const savedEmail = () => { try { return localStorage.getItem("ud.email") || ""; } catch (_) { return ""; } };
+/* sunucu fonksiyonu: oturumdaki kullanıcının kimliğiyle çağrılır */
+window.__fn = async (action, body) => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error("Oturum kapanmış, tekrar giriş yap.");
+  let r;
+  try { r = await fetch(`${CFG.url}/functions/v1/defter?action=${encodeURIComponent(action)}`, { method: "POST", headers: { Authorization: `Bearer ${session.access_token}`, apikey: CFG.key, "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }); }
+  catch (e) { throw new Error("Sunucuya ulaşılamadı. İnterneti kontrol et."); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(j.error || `Sunucu hatası (${r.status})`);
+  return j;
+};
 let recovering = /type=recovery/.test(location.hash);
 let booted = false;
 
@@ -165,7 +178,7 @@ async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return authView("login");
   if (recovering) return authView("newpass");
-  const email = (session.user.email || "").toLowerCase();
+  const email = (session.user.email || "").toLowerCase(); rememberEmail(email);
   const { data: mem, error } = await sb.from("members").select("email,role,name");
   if (error) return authView("login", errText(error));
   const me = mem.find(m => m.email.toLowerCase() === email);
