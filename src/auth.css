@@ -1,0 +1,14 @@
+/* giriş ekranı */
+.authwrap{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px 16px;overflow-y:auto}
+.authcard{width:min(420px,100%);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px 22px;display:flex;flex-direction:column;gap:14px}
+.authcard .mark{display:flex;align-items:center;gap:10px}
+.authcard .mark b{font:700 22px/1 var(--f-disp);letter-spacing:.03em;text-transform:uppercase}
+#authbox{display:flex;flex-direction:column;gap:12px}
+#authbox h1{font:700 26px/1.1 var(--f-disp);letter-spacing:.02em;margin:4px 0 0}
+#authbox .a-sub{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+#authbox form{display:flex;flex-direction:column;gap:12px}
+#authbox .fld input{font-size:16px;padding:11px 12px}
+#authbox .btn.pri{justify-content:center;padding:11px 14px;font-size:16px}
+.a-err{color:var(--bad);font-size:14px;background:var(--bad-soft);border-radius:8px;padding:9px 11px}
+.a-links{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.a-links button{background:none;border:0;color:var(--firm-b);font-size:14px;padding:4px 0;text-decoration:underline;text-underline-offset:3px}
