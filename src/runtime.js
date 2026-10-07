@@ -182,6 +182,10 @@ async function boot() {
   };
   $("auth").hidden = true;
   try { await loadAll(); } catch (e) { console.error(e); }
+  if (me.role === "owner" && ![...cache.values()].some(m => m.size)) {
+    try { const rows = await fetch("baslangic.json", { cache: "no-store" }).then(r => r.json());
+      const { error } = await sb.from("docs").upsert(rows, { onConflict: "col,id", ignoreDuplicates: true }); if (!error) await loadAll(); } catch (e) { console.error(e); }
+  }
   sb.channel("docs-rt").on("postgres_changes", { event: "*", schema: "public", table: "docs" }, p => {
     const r = p.eventType === "DELETE" ? p.old : p.new; if (!r?.col || !r?.id) return;
     if (p.eventType === "DELETE") colMap(r.col).delete(r.id); else colMap(r.col).set(r.id, r.data);
