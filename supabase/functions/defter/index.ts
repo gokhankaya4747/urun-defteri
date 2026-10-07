@@ -26,6 +26,11 @@ Deno.serve(async (req) => {
     if (action === "kur") return json(await doKur(req));
     if (action === "haftalik") return json(await doHaftalik(req));
     if (action === "oku") return json(await doOku(req));
+    if (action === "push-key") return json({ key: (await vapid()).pub });
+    if (action === "push-test") return json(await doPushTest(req));
+    if (action === "push-kayit") return json(await doPushKayit(req));
+    if (action === "bildirim") return json(await doBildirim());
+    if (action === "yeni") return json(await doYeni(req));
     return json({ error: "bilinmeyen işlem" }, 400);
   } catch (e) {
     console.error(action, e);
@@ -365,4 +370,159 @@ Kurallar:
   let data;
   try { data = JSON.parse(text); } catch { throw new HttpError(502, "Belge okunurken beklenmeyen bir yanıt geldi, tekrar dene."); }
   return { ok: true, data, model: resp.model };
+}
+
+/* ---------- 5) telefona bildirim (Web Push, RFC 8291 + VAPID RFC 8292, harici kütüphanesiz) ---------- */
+const b64u = (u: Uint8Array) => b64(u).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s: string) => { const t = s.replace(/-/g, "+").replace(/_/g, "/"); const b = atob(t + "===".slice((t.length + 3) % 4)); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+const cat = (...a: Uint8Array[]) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of a) { o.set(x, i); i += x.length; } return o; };
+const enc = (s: string) => new TextEncoder().encode(s);
+let VAPID: { pub: string; priv: CryptoKey } | null = null;
+async function vapid() {
+  if (VAPID) return VAPID;
+  const { data } = await admin.from("app_keys").select("data").eq("id", "vapid").maybeSingle();
+  let jwk = data?.data as JsonWebKey | undefined;
+  if (!jwk) {
+    const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    jwk = await crypto.subtle.exportKey("jwk", kp.privateKey) as JsonWebKey;
+    const { error } = await admin.from("app_keys").insert({ id: "vapid", data: jwk });
+    if (error) { const r = await admin.from("app_keys").select("data").eq("id", "vapid").single(); jwk = r.data!.data as JsonWebKey; }
+  }
+  const priv = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const pub = b64u(cat(new Uint8Array([4]), unb64u(jwk.x!), unb64u(jwk.y!)));
+  VAPID = { pub, priv };
+  return VAPID;
+}
+async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, len: number) {
+  const k = await crypto.subtle.importKey("raw", ikm as BufferSource, "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: salt as BufferSource, info: info as BufferSource }, k, len * 8));
+}
+async function encryptPush(sub: { keys: { p256dh: string; auth: string } }, payload: Uint8Array) {
+  const uaPub = unb64u(sub.keys.p256dh), auth = unb64u(sub.keys.auth);
+  const eph = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const asPub = new Uint8Array(await crypto.subtle.exportKey("raw", eph.publicKey));
+  const uaKey = await crypto.subtle.importKey("raw", uaPub, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: uaKey }, eph.privateKey, 256));
+  const ikm = await hkdf(auth, shared, cat(enc("WebPush: info\0"), uaPub, asPub), 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(salt, ikm, enc("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, enc("Content-Encoding: nonce\0"), 12);
+  const key = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["encrypt"]);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, cat(payload, new Uint8Array([2]))));
+  const rs = new Uint8Array([0, 0, 16, 0]);
+  return cat(salt, rs, new Uint8Array([asPub.length]), asPub, ct);
+}
+async function vapidAuth(endpoint: string) {
+  const v = await vapid();
+  const aud = new URL(endpoint).origin;
+  const head = b64u(enc(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const body = b64u(enc(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: `mailto:${MAIL_FROM}` })));
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, v.priv, enc(`${head}.${body}`)));
+  return `vapid t=${head}.${body}.${b64u(sig)}, k=${v.pub}`;
+}
+async function sendPush(sub: any, msg: { title: string; body: string; url?: string; tag?: string }) {
+  const bodyBytes = await encryptPush(sub, enc(JSON.stringify(msg)));
+  const r = await fetch(sub.endpoint, { method: "POST", headers: { Authorization: await vapidAuth(sub.endpoint), "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", TTL: "86400", Urgency: "normal" }, body: bodyBytes });
+  return r.status;
+}
+// Abonelikler push_subs tablosunda (istemci politikası yok — sadece bu fonksiyon okur/yazar)
+async function subscriptions() {
+  const { data } = await admin.from("push_subs").select("id,email,data");
+  return (data || []).map((r) => ({ id: r.id, email: r.email, ...(r.data as any) }));
+}
+const subKey = async (ep: string) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", enc(ep)))).slice(0, 22);
+async function doPushKayit(req: Request) {
+  const me = await caller(req);
+  if (!me) throw new HttpError(401, "Giriş yapmalısın.");
+  const b = await req.json().catch(() => ({}));
+  const ep = String(b.endpoint || b.sub?.endpoint || "");
+  if (!/^https:\/\//.test(ep)) throw new HttpError(400, "geçersiz abonelik");
+  const id = await subKey(ep);
+  const { data: cur } = await admin.from("push_subs").select("email,data").eq("id", id).maybeSingle();
+  const mine = cur && cur.email === me.email ? (cur.data as any) : null;
+  if (b.op === "sil") { if (mine) await admin.from("push_subs").delete().eq("id", id); return { ok: true }; }
+  if (b.op === "durum") return { ok: true, on: !!mine, prefs: mine?.prefs || null };
+  const prefs = { eta: true, due: true, yeni: true, ...(mine?.prefs || {}), ...(b.prefs || {}) };
+  const sub = b.sub?.keys?.p256dh && b.sub?.keys?.auth ? { endpoint: ep, keys: { p256dh: String(b.sub.keys.p256dh), auth: String(b.sub.keys.auth) } } : mine?.sub;
+  if (!sub) throw new HttpError(400, "abonelik anahtarı yok");
+  const { error } = await admin.from("push_subs").upsert({ id, email: me.email, data: { sub, prefs, device: String(b.device || mine?.device || "").slice(0, 40), at: new Date().toISOString() } });
+  if (error) throw error;
+  return { ok: true, on: true, prefs };
+}
+async function pushTo(filter: (s: any) => boolean, msg: { title: string; body: string; url?: string; tag?: string }) {
+  const subs = (await subscriptions()).filter(filter);
+  let ok = 0;
+  for (const s of subs) {
+    try {
+      const st = await sendPush(s.sub, msg);
+      if (st === 404 || st === 410) await admin.from("push_subs").delete().eq("id", s.id);
+      else if (st >= 200 && st < 300) ok++;
+      else console.error("push", st, s.sub?.endpoint?.slice(0, 40));
+    } catch (e) { console.error("push hata", e); }
+  }
+  return { cihaz: subs.length, gonderilen: ok };
+}
+async function doPushTest(req: Request) {
+  const me = await caller(req);
+  if (!me) throw new HttpError(401, "Giriş yapmalısın.");
+  return await pushTo((s) => s.email === me.email, { title: "Ürün Defteri", body: "Bildirimler bu cihazda çalışıyor.", url: "./", tag: "test" });
+}
+const wantPref = (s: any, k: string) => s?.prefs?.[k] !== false;
+async function doBildirim() {
+  const log = (await getDoc("settings", "pushlog")) || {};
+  const t = todayTR();
+  if (log.__last === t) return { ok: true, atlandi: "bugün gönderildi" };
+  const M = model(await allDocs());
+  const alerts: { k: string; pref: string; title: string; body: string; url: string }[] = [];
+  const lotLabel = (l: any) => `${l.code} ${[...new Set(l.items.map((it: any) => M.prodName(it)))].join(", ")}`;
+  for (const l of M.lots) {
+    if ((l.status === "yuklendi" || l.status === "yolda") && l.eta) {
+      const d = daysTo(l.eta);
+      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: d === 0 ? "Konteyner bugün Mersin'de" : `Konteyner ${d === 1 ? "yarın" : "3 gün sonra"} Mersin'de`, body: `${lotLabel(l)}${l.carrier ? " · " + l.carrier : ""}`, url: `./#lot=${l.id}` });
+      else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `Varış ${-d} gün gecikti`, body: `${lotLabel(l)} · gemi firmasından kontrol et`, url: `./#lot=${l.id}` });
+    }
+    const c = M.lotC.get(l.id);
+    if (l.payDue && c && c.due > 1) {
+      const d = daysTo(l.payDue);
+      if (d === 3 || d === 0) alerts.push({ k: `lotdue:${l.id}:${d}`, pref: "due", title: d === 0 ? "Tedarikçi ödemesinin vadesi bugün" : "Tedarikçi ödemesine 3 gün kaldı", body: `${M.pname(l.supplierId, l.supplier)} · ${l.code} · kalan ${usdf(c.due)}`, url: `./#lot=${l.id}` });
+      else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `lotdue:${l.id}:${d}`, pref: "due", title: `Tedarikçi ödemesi ${-d} gün gecikti`, body: `${M.pname(l.supplierId, l.supplier)} · ${l.code} · kalan ${usdf(c.due)}`, url: `./#lot=${l.id}` });
+    }
+  }
+  for (const s of M.sales) {
+    const c = M.saleC.get(s.id);
+    if (!s.dueDate || !c || c.olot || c.due <= 1) continue;
+    const d = daysTo(s.dueDate), who = M.pname(s.customerId, s.customer);
+    if (d === 3 || d === 0) alerts.push({ k: `saledue:${s.id}:${d}`, pref: "due", title: d === 0 ? "Bugün tahsilat vadesi" : "Tahsilat vadesine 3 gün kaldı", body: `${who} · ${usdf(c.due)}`, url: `./#sale=${s.id}` });
+    else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `saledue:${s.id}:${d}`, pref: "due", title: `Tahsilat ${-d} gün gecikti`, body: `${who} · ${usdf(c.due)} ödenmedi`, url: `./#sale=${s.id}` });
+  }
+  const fresh = alerts.filter((a) => !log[a.k]);
+  const out: any[] = [];
+  for (const a of fresh) { out.push({ k: a.k, ...(await pushTo((s) => wantPref(s, a.pref), { title: a.title, body: a.body, url: a.url, tag: a.k })) }); log[a.k] = t; }
+  const keep: Record<string, string> = { __last: t };
+  for (const [k, v] of Object.entries(log)) if (k !== "__last" && typeof v === "string" && daysTo(v) > -30) keep[k] = v;
+  await putDoc("settings", "pushlog", keep);
+  return { ok: true, uyari: fresh.length, sonuc: out };
+}
+const KIND_TR: Record<string, string> = { lots: "yeni alım", sales: "yeni satış", pays: "yeni ödeme", exps: "yeni masraf" };
+async function doYeni(req: Request) {
+  const { col, id } = await req.json().catch(() => ({}));
+  if (!KIND_TR[col] || !id) throw new HttpError(400, "geçersiz");
+  const d = await getDoc(col, id);
+  if (!d || d.ornek || !d.createdAt || Date.now() - Date.parse(d.createdAt) > 10 * 60e3) return { ok: true, atlandi: true };
+  const log = (await getDoc("settings", "pushnew")) || {};
+  if (log[col + ":" + id]) return { ok: true, atlandi: "gönderildi" };
+  const rows = await allDocs(); const M = model(rows);
+  const { data: members } = await admin.from("members").select("email,name");
+  const by = (members || []).find((m) => m.email.toLowerCase() === String(d.createdBy || "").toLowerCase());
+  const who = by?.name || String(d.createdBy || "Biri").split("@")[0];
+  let body = "", url = "./";
+  if (col === "lots") { const l = M.lots.find((x: any) => x.id === id); body = `${l?.code || ""} · ${M.pname(d.supplierId, d.supplier)} · ${(l?.items || []).map((it: any) => `${M.prodName(it)}${it.model ? " " + it.model : ""} ${fmt0.format(+it.kg || 0)} kg`).join(", ")}`; url = `./#lot=${id}`; }
+  if (col === "sales") { const c = M.saleC.get(id); body = `${M.pname(d.customerId, d.customer)} · ${MK[d.market] || ""}${c ? " · " + usdf(c.totUSD) : ""}`; url = `./#sale=${id}`; }
+  if (col === "pays") { body = `${d.dir === "out" ? "Ödeme" : "Tahsilat"} · ${M.pname(d.partyId, d.party)} · ${d.cur === "TL" ? fmt0.format(+d.amount || 0) + " ₺" : usdf(+d.amount || 0)}${d.bank ? " · " + d.bank : ""}`; url = `./#pay=${id}`; }
+  if (col === "exps") { body = `${d.cat || "Masraf"} · ${d.cur === "TL" ? fmt0.format(+d.amount || 0) + " ₺" : usdf(+d.amount || 0)}`; url = `./#exp=${id}`; }
+  const r = await pushTo((s) => wantPref(s, "yeni") && s.email !== String(d.createdBy || "").toLowerCase(), { title: `${who} ${KIND_TR[col]} girdi`, body, url, tag: col + ":" + id });
+  log[col + ":" + id] = todayTR();
+  const keep: Record<string, string> = {}; for (const [k, v] of Object.entries(log)) if (typeof v === "string" && daysTo(v) > -7) keep[k] = v;
+  await putDoc("settings", "pushnew", keep);
+  return { ok: true, ...r };
 }
