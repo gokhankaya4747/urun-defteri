@@ -33,9 +33,15 @@ function authView(m, info) {
     reset: ["Şifremi unuttum", "E-postanı yaz, şifre yenileme bağlantısı gönderelim."],
     newpass: ["Yeni şifre", "Yeni şifreni belirle."],
   };
+  if (m === "offline") {
+    box.innerHTML = `<h1>Bağlantı yok</h1><p class="a-sub">Oturumun açık; sadece sunucuya şu an ulaşılamıyor. İnternet gelince otomatik bağlanacak.</p><button class="btn pri" type="button" id="a_retry">Tekrar dene</button>`;
+    $("a_retry").addEventListener("click", () => location.reload());
+    const on = () => { window.removeEventListener("online", on); location.reload(); }; window.addEventListener("online", on);
+    return;
+  }
   if (m === "denied" || m === "setup" || m === "sent") {
     box.innerHTML = `<h1>Ürün Defteri</h1><p class="a-sub">${info}</p>${m === "denied" ? `<button class="btn" type="button" id="a_out">Çıkış yap</button>` : m === "sent" ? `<button class="btn" type="button" id="a_back">Giriş ekranına dön</button>` : ""}`;
-    $("a_out")?.addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
+    $("a_out")?.addEventListener("click", async () => { setRT(""); await sb.auth.signOut(); location.reload(); });
     $("a_back")?.addEventListener("click", () => authView("login"));
     return;
   }
@@ -79,6 +85,28 @@ if (!CFG.url || !CFG.key || !window.supabase) {
   return;
 }
 const sb = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: "urun-defteri-oturum" } });
+/* Oturum, çıkış yapılana kadar kalır. Ana oturum localStorage'da; yenileme anahtarı ayrıca uzun ömürlü bir
+   çerezde yedeklenir. Telefon uygulamayı kapatıp açınca bağlantı geç gelirse giriş ekranı gösterilmez, tekrar denenir. */
+const RT = "ud_rt";
+const setRT = t => { try { document.cookie = t ? `${RT}=${encodeURIComponent(t)}; Max-Age=34560000; Path=/; Secure; SameSite=Strict` : `${RT}=; Max-Age=0; Path=/; Secure; SameSite=Strict`; } catch (_) {} };
+const getRT = () => { const m = document.cookie.match(/(?:^|; )ud_rt=([^;]*)/); return m ? decodeURIComponent(m[1]) : ""; };
+const isNet = e => !!e && (e.name === "AuthRetryableFetchError" || e.status === 0 || /fetch|network|load failed|timeout|offline/i.test(e.message || ""));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function restoreSession() {
+  for (let i = 0; i < 5; i++) {
+    const { data, error } = await sb.auth.getSession();
+    if (data?.session) return { session: data.session };
+    const rt = getRT();
+    if (rt) {
+      const r = await sb.auth.refreshSession({ refresh_token: rt });
+      if (r.data?.session) return { session: r.data.session };
+      if (r.error && !isNet(r.error)) { setRT(""); return { session: null }; }
+    } else if (!isNet(error)) return { session: null };
+    if (!navigator.onLine) return { session: null, offline: true };
+    await sleep(700 * (i + 1));
+  }
+  return { session: null, offline: true };
+}
 const rememberEmail = e => { try { localStorage.setItem("ud.email", e); } catch (_) {} };
 const savedEmail = () => { try { return localStorage.getItem("ud.email") || ""; } catch (_) { return ""; } };
 /* sunucu fonksiyonu: oturumdaki kullanıcının kimliğiyle çağrılır */
@@ -175,12 +203,16 @@ let bootP = null;
 const bootOnce = () => bootP || (bootP = boot().finally(() => { if (!booted) bootP = null; }));
 async function boot() {
   if (booted) return;
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return authView("login");
+  $("authbox").innerHTML = `<p class="a-sub">Bağlanıyor…</p>`;
+  const { session, offline } = await restoreSession();
+  if (!session) return offline ? authView("offline") : authView("login");
+  setRT(session.refresh_token);
+  try { navigator.storage?.persist?.(); } catch (_) {}
   if (recovering) return authView("newpass");
   const email = (session.user.email || "").toLowerCase(); rememberEmail(email);
-  const { data: mem, error } = await sb.from("members").select("email,role,name");
-  if (error) return authView("login", errText(error));
+  let mem = null, error = null;
+  for (let i = 0; i < 5 && !mem; i++) { const r = await sb.from("members").select("email,role,name"); if (!r.error) mem = r.data; else { error = r.error; await sleep(700 * (i + 1)); } }
+  if (!mem) return authView("offline", errText(error));
   const me = mem.find(m => m.email.toLowerCase() === email);
   if (!me) return authView("denied", `<b>${email}</b> hesabı bu deftere ekli değil. Defterin sahibinden, Ayarlar → Kullanıcılar bölümünden bu e-postayı eklemesini iste; sonra sayfayı yenile.`);
   booted = true;
@@ -197,7 +229,7 @@ async function boot() {
     async list() { const { data, error } = await sb.from("members").select("email,role,name,created_at").order("created_at"); if (error) throw error; data.forEach(m => (names[m.email.toLowerCase()] = m.name || m.email.split("@")[0])); return data; },
     async add(em, role, name) { const { error } = await sb.from("members").insert({ email: em, role, name }); if (error) throw new Error(error.code === "23505" ? "Bu e-posta zaten listede." : error.message); },
     async remove(em) { const { error } = await sb.from("members").delete().eq("email", em); if (error) throw error; },
-    async logout() { await sb.auth.signOut(); location.reload(); },
+    async logout() { setRT(""); await sb.auth.signOut(); location.reload(); },
   };
   $("auth").hidden = true;
   try { await loadAll(); } catch (e) { console.error(e); }
@@ -213,7 +245,8 @@ async function boot() {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadAll().catch(() => {}); });
   resolveRT({ db, user: me.role === "viewer" ? { ...user, can: async () => false } : user, downloads, assets: me.role === "viewer" ? null : assets });
 }
-sb.auth.onAuthStateChange((ev) => {
+sb.auth.onAuthStateChange((ev, sess) => {
+  if (sess?.refresh_token && (ev === "SIGNED_IN" || ev === "TOKEN_REFRESHED" || ev === "INITIAL_SESSION")) setRT(sess.refresh_token);
   if (ev === "PASSWORD_RECOVERY") { recovering = true; authView("newpass"); }
   else if (ev === "SIGNED_IN" && !booted && !recovering) bootOnce().catch(e => authView("login", errText(e)));
   else if (ev === "SIGNED_OUT" && booted) location.reload();
