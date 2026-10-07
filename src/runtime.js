@@ -137,6 +137,12 @@ const assets = {
   },
   async delete(id) { await sb.storage.from(BUCKET).remove([id]); urlCache.delete(id); return { deleted: true }; },
 };
+window.__blobUrl = async id => {
+  const c = urlCache.get(id); if (c?.exp > Date.now()) return c.url;
+  const { data } = await sb.storage.from(BUCKET).createSignedUrl(id, 3600);
+  if (data?.signedUrl) { urlCache.set(id, { url: data.signedUrl, exp: Date.now() + 3300e3 }); return data.signedUrl; }
+  return "";
+};
 window.__blobHook = async root => {
   const els = [...root.querySelectorAll("[data-blob],[data-blob-href]")]; if (!els.length) return;
   const idOf = e => e.dataset.blob ?? e.dataset.blobHref;
