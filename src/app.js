@@ -33,9 +33,16 @@ const CARRIERS = {
 };
 const trackUrl = (carrier,n,t) => { const k=Object.keys(CARRIERS).find(c=>key(c)===key(carrier)); return k ? CARRIERS[k](encodeURIComponent(n),t) : `https://www.google.com/search?q=${encodeURIComponent((carrier||"")+" container tracking "+n)}`; };
 const cntList = l => Array.isArray(l.cntNos) ? l.cntNos.filter(Boolean) : String(l.cntNos||"").split(/[\s,;]+/).filter(Boolean);
+const isTir = x => x?.transport==="tir";
+const TRANSPORT_SEG = {k:"transport",label:"Nasıl geliyor?",type:"seg",options:[["gemi","Gemi / konteyner"],["tir","TIR / kara yolu"]]};
+const tirFields = () => [
+  {k:"trucker",label:"Nakliye firması",half:true,list:()=>uniq(S.lots.map(z=>z.trucker)),ph:"Nakliyeci",showIf:isTir},
+  {k:"cmr",label:"CMR no",half:true,showIf:isTir},
+  {k:"plates",type:"list",label:"TIR plakası",addLabel:"Plaka ekle",ph:"34 ABC 123",showIf:isTir}];
+const isBeyan = d => /beyanname/i.test(d?.kind||"");
 const DOCK = {
-  lots:["Alış faturası","Konşimento (B/L)","Menşe şahadetnamesi","Fitosanitasyon","Packing list","Proforma / sözleşme","Diğer"],
-  sales:["Satış faturası","İhracat beyannamesi","CMR / taşıma belgesi","Diğer"],
+  lots:["Alış faturası","Gümrük beyannamesi","Konşimento (B/L)","CMR / taşıma belgesi","Menşe şahadetnamesi","Fitosanitasyon","Packing list","Proforma / sözleşme","Diğer"],
+  sales:["Satış faturası","Gümrük beyannamesi","CMR / taşıma belgesi","Diğer"],
   exps:["Masraf faturası","Makbuz","Diğer"],
   pays:["Dekont","Diğer"],
 };
@@ -202,7 +209,7 @@ function render(){
   m.innerHTML=h;
   fillNames(m); window.__blobHook?.(m);
   const top=S.stack[S.stack.length-1];
-  if(top && !["form","scan","pdf","notify","choose"].includes(top.type)) renderSheet();
+  if(top && !["form","scan","pdf","notify","choose","beyan"].includes(top.type)) renderSheet();
   if(!S.hashDone && S.lots.length && location.hash.length>2){ if(handleHash()) S.hashDone=true; }
 }
 const prodChips = () => `<div class="chips" role="group" aria-label="Ürün"><button type="button" class="chip" data-prod="all" aria-pressed="${S.prod==="all"}">Tüm ürünler</button>${prodList().map(p=>`<button type="button" class="chip" data-prod="${esc(p.id)}" aria-pressed="${S.prod===p.id}">${esc(p.name)}</button>`).join("")}</div>`;
@@ -244,7 +251,7 @@ function lotCard(l){
     <div class="barl"><span>Ödenen %${Math.round(c.pct*100)}</span><span>${c.due>1?"Kalan "+usdf(c.due):"Ödendi"}</span></div>
   </button>`;
 }
-function lotMatches(l,q){ if(!q) return true; return key([l.code,lotSupplier(l),l.origin,...cntList(l),l.bl,l.booking,l.carrier,l.vessel,l.note,...l.items.map(itemLabel)].join(" ")).includes(key(q)); }
+function lotMatches(l,q){ if(!q) return true; return key([l.code,lotSupplier(l),l.origin,...cntList(l),l.bl,l.booking,l.carrier,l.vessel,l.trucker,l.cmr,...(l.plates||[]),l.note,...l.items.map(itemLabel)].join(" ")).includes(key(q)); }
 function vAlimlar(){
   const lots=S.lots.filter(inFirm).filter(l=>S.prod==="all"||lotHasProd(l,S.prod)).filter(l=>lotMatches(l,S.pq));
   const cnt=k=>lots.filter(l=>l.status===k).length;
@@ -369,7 +376,7 @@ function renderSheet(){
   if(!top){ root.innerHTML=""; root.dataset.k=""; document.body.style.overflow=""; return; }
   document.body.style.overflow="hidden";
   const R={lot:()=>sLot(top.id),sale:()=>sSale(top.id),pay:()=>sPay(top.id),exp:()=>sExp(top.id),party:()=>sParty(top.pk,top.dir),prod:()=>sProd(top.id),
-    choose:sChoose,settings:sSettings,setprods:sSetProds,users:sUsers,mail:sMail,notify:()=>sNotify(top),pdf:()=>sPdf(top),firms:sFirms,setparties:()=>sSetParties(top.kind),doc:()=>sDoc(top),form:()=>formR(top),scan:()=>sScan(top)};
+    choose:sChoose,settings:sSettings,setprods:sSetProds,users:sUsers,mail:sMail,notify:()=>sNotify(top),beyan:()=>sBeyan(top),pdf:()=>sPdf(top),firms:sFirms,setparties:()=>sSetParties(top.kind),doc:()=>sDoc(top),form:()=>formR(top),scan:()=>sScan(top)};
   let r=(R[top.type]||(()=>null))();
   if(!r) r=loadingR("");
   const k=top.type+"|"+(top.id||top.pk||top.kind||"")+"|"+S.stack.length;
@@ -389,7 +396,7 @@ const exBadge = r => r.ornek?`<span class="pill" style="color:var(--warn)">örne
 /* --- belgeler --- */
 function docsSec(col,rec,hint){
   const docs=rec.docs||[];
-  const up = assets&&canWrite ? `<div class="upl"><select id="dkind" aria-label="Belge türü">${DOCK[col].map(k=>`<option>${esc(k)}</option>`).join("")}</select><label class="btn sm pri">${svg(IC_CAM,15)}Belge tara<input type="file" accept="image/*" capture="environment" hidden data-scan="${col}" data-id="${rec.id}"></label><label class="btn sm">${svg(IC_IMG,15)}Galeriden tara<input type="file" accept="image/*" hidden data-scan="${col}" data-id="${rec.id}"></label><label class="btn sm">${svg('<path d="M12 5v14M5 12h14"/>',14)}Dosya ekle<input type="file" accept="image/*,application/pdf" multiple hidden data-upload="${col}" data-id="${rec.id}"></label></div>` : "";
+  const up = assets&&canWrite ? `<div class="upl"><select id="dkind" aria-label="Belge türü">${DOCK[col].map(k=>`<option>${esc(k)}</option>`).join("")}</select><label class="btn sm pri">${svg(IC_CAM,15)}Belge tara<input type="file" accept="image/*" capture="environment" hidden data-scan="${col}" data-id="${rec.id}"></label><label class="btn sm">${svg(IC_IMG,15)}Galeriden tara<input type="file" accept="image/*" hidden data-scan="${col}" data-id="${rec.id}"></label><label class="btn sm">${svg('<path d="M12 5v14M5 12h14"/>',14)}Dosya ekle<input type="file" accept="image/*,application/pdf" multiple hidden data-upload="${col}" data-id="${rec.id}"></label><button type="button" class="btn sm" data-act="paste-doc">${svg('<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>',14)}Yapıştır</button></div>` : "";
   return `<div class="dsec"><div class="h"><h4>Belgeler</h4>${up}</div>${docs.length?`<div class="docs">${docs.map((d,i)=>`<button type="button" class="doc" data-lbdoc="${col}|${rec.id}|${i}">${d.thumb?`<span class="th"><img ${blobA(d.thumb)} alt="${esc(d.kind)}" loading="lazy"></span>`:d.ct==="application/pdf"?`<span class="th">PDF</span>`:`<span class="th"><img ${blobA(d.id)} alt="${esc(d.kind)}" loading="lazy"></span>`}<span class="dn">${esc(d.kind)}${d.ct==="application/pdf"?` · PDF${d.pages?" "+d.pages+" s.":""}`:""}</span></button>`).join("")}</div>`:`<div class="muted" style="font-size:13px">${assets&&canWrite?hint:"Belge eklenmemiş."}</div>`}</div>`;
 }
 function sDoc(t){
@@ -499,7 +506,10 @@ function sLot(id){
   const log=(l.log||[]).slice().reverse().map(x=>`<div><time>${fds(x.t)} ${String(x.t).slice(0,4)}</time><span>${esc(x.x)}${x.by?" · "+who(x.by):""}</span></div>`).join("");
   const nums=[...cntList(l).map(n=>["Konteyner",n]),...(l.bl?[["B/L",l.bl]]:[]),...(l.booking?[["Booking",l.booking]]:[])];
   const eta=l.eta&&(l.status==="yuklendi"||l.status==="yolda")?days(l.eta):null;
-  const track = nums.length||l.carrier||l.eta ? `<div class="trackbox"><div class="tb-h"><b>${esc(l.carrier||"Gemi firması girilmedi")}</b>${l.eta?`<span class="muted">Tahmini varış ${fd(l.eta)}${eta!==null?` · ${eta<0?`<span style="color:var(--bad)">${-eta} gün gecikti</span>`:eta===0?"bugün":eta+" gün kaldı"}`:""}</span>`:""}</div>
+  const plates=l.plates||[];
+  const track = isTir(l) ? `<div class="trackbox"><div class="tb-h"><b>TIR · ${esc(l.trucker||"nakliye firması girilmedi")}</b>${l.eta?`<span class="muted">Tahmini varış ${fd(l.eta)}${eta!==null?` · ${eta<0?`<span style="color:var(--bad)">${-eta} gün gecikti</span>`:eta===0?"bugün":eta+" gün kaldı"}`:""}</span>`:""}</div>
+    ${plates.length||l.cmr?`<div class="tb-nums">${plates.map(n=>`<button type="button" class="trk" data-trackcopy="${esc(n)}"><span class="muted">Plaka</span> <span class="mono">${esc(n)}</span></button>`).join("")}${l.cmr?`<button type="button" class="trk" data-trackcopy="${esc(l.cmr)}"><span class="muted">CMR</span> <span class="mono">${esc(l.cmr)}</span></button>`:""}</div><div class="muted" style="font-size:12px">Dokununca numara kopyalanır.</div>`:`<div class="muted" style="font-size:13px">Plaka ve CMR no'yu “Düzenle”den girebilirsin.</div>`}</div>`
+    : nums.length||l.carrier||l.eta ? `<div class="trackbox"><div class="tb-h"><b>${esc(l.carrier||"Gemi firması girilmedi")}</b>${l.eta?`<span class="muted">Tahmini varış ${fd(l.eta)}${eta!==null?` · ${eta<0?`<span style="color:var(--bad)">${-eta} gün gecikti</span>`:eta===0?"bugün":eta+" gün kaldı"}`:""}</span>`:""}</div>
     ${nums.length?`<div class="tb-nums">${nums.map(([t,n])=>`<a class="trk" href="${esc(trackUrl(l.carrier,n,t))}" target="_blank" rel="noopener" data-trackcopy="${esc(n)}"><span class="muted">${t}</span> <span class="mono">${esc(n)}</span> ${svg('<path d="M7 17L17 7M9 7h8v8"/>',13)}</a>`).join("")}</div><div class="muted" style="font-size:12px">Numaraya dokununca ${esc(l.carrier||"firmanın")} takip sayfası açılır, numara da kopyalanır.</div>`:`<div class="muted" style="font-size:13px">Konteyner, B/L veya booking no girersen buradan tek dokunuşla takip edebilirsin.</div>`}</div>` : "";
   const body=`<div class="dhead"><div class="code"><span>${esc(l.code||"")}</span>${stPill(l.status)}${o?`<span class="badge">Ortak alım</span>`:""}${exBadge(l)}</div><div class="ttl">${esc(lotProducts(l))}</div><div class="muted">${esc(lotSupplier(l))}${l.origin?" · "+esc(l.origin):""}</div></div>
     <div class="stepper" role="group" aria-label="Aşama">${step}</div>
@@ -509,7 +519,7 @@ function sLot(id){
     ${money}${ortak}
     ${docsSec("lots",l,"Alış faturası, konşimento, menşe şahadetnamesi gibi belgelerin fotoğrafını çek ya da PDF ekle.")}
     <details class="dmore"><summary>Alım bilgileri</summary>
-    ${kvHTML([["Firma",firmTag(l.firmId)],["Tedarikçi",`<button class="btn sm" type="button" data-party="${esc(pkey(l.supplierId,l.supplier))}" data-pdir="out">${esc(lotSupplier(l))}</button>`],["Menşe",esc(l.origin||"—")],["Teslim",esc(l.incoterm||"—")],["Fatura no",esc(l.invoiceNo||"—")],["Bakiye vadesi",fd(l.payDue)],["Konteyner",l.cnt?`${l.cnt} adet`:"—"],["Gemi firması",esc(l.carrier||l.vessel||"—")],["Sipariş",fd(l.orderDate)],["Yükleme",fd(l.loadDate)],["Tahmini varış",fd(l.eta)],["Mersin'e varış",fd(l.arriveDate)],...(l.cur==="TL"?[["Kur",nf4.format(+l.kur||0)]]:[])])}
+    ${kvHTML([["Firma",firmTag(l.firmId)],["Tedarikçi",`<button class="btn sm" type="button" data-party="${esc(pkey(l.supplierId,l.supplier))}" data-pdir="out">${esc(lotSupplier(l))}</button>`],["Menşe",esc(l.origin||"—")],["Teslim",esc(l.incoterm||"—")],["Fatura no",esc(l.invoiceNo||"—")],["Bakiye vadesi",fd(l.payDue)],...(isTir(l)?[["Taşıma","TIR / kara yolu"],["Nakliye firması",esc(l.trucker||"—")],["Plaka",esc((l.plates||[]).join(", ")||"—")],["CMR no",esc(l.cmr||"—")]]:[["Konteyner",l.cnt?`${l.cnt} adet`:"—"],["Gemi firması",esc(l.carrier||l.vessel||"—")]]),["Sipariş",fd(l.orderDate)],["Yükleme",fd(l.loadDate)],["Tahmini varış",fd(l.eta)],["Mersin'e varış",fd(l.arriveDate)],...(l.cur==="TL"?[["Kur",nf4.format(+l.kur||0)]]:[])])}
     ${l.note?`<div class="note">${esc(l.note)}</div>`:""}
     </details>
     <div class="dsec"><div class="h"><h4>Tedarikçiye ödemeler</h4>${canWrite?`<button class="btn sm" type="button" data-act="pay-lot" data-id="${l.id}">+ Ödeme</button>`:""}</div><div class="panel rows">${c.pays.length?c.pays.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(payRow).join(""):`<div class="empty">Ödeme girilmedi.</div>`}</div></div>
@@ -597,7 +607,8 @@ function sProd(pid){
   const lotRow=l=>`<button type="button" class="row" data-lot="${l.id}"><span class="main"><div class="t">${esc(l.code)} · ${esc(lotSupplier(l))}</div><div class="sub">${l.items.filter(it=>matchProd(it,pid)).map(it=>{const ci=C.item.get(l.id+"|"+it.k); return `${it.model||"model yok"} ${nf0.format(+it.kg||0)} kg${ci?.soldKg?` (kalan ${nf0.format(Math.max(0,itemStock(ci)))})`:""}`;}).join(" · ")}</div></span><span class="end"><div class="a">${stPill(l.status)}</div><div class="b">${fd(l.orderDate)}</div></span></button>`;
   const body=`<div class="panel">${modelTable(prodStats(pid))}</div>
     <div class="dsec"><div class="h"><h4>Alımlar</h4></div><div class="panel rows">${lots.length?lots.map(lotRow).join(""):`<div class="empty">Bu ürünün alımı yok.</div>`}</div></div>
-    <div class="dsec"><div class="h"><h4>Satışlar</h4></div><div class="panel rows">${sales.length?sales.slice(0,40).map(saleRow).join(""):`<div class="empty">Bu ürünün satışı yok.</div>`}</div></div>`;
+    <div class="dsec"><div class="h"><h4>Satışlar</h4></div><div class="panel rows">${sales.length?sales.slice(0,40).map(saleRow).join(""):`<div class="empty">Bu ürünün satışı yok.</div>`}</div></div>
+    ${beyanSec(pid)}`;
   return {title:esc(p.name),body};
 }
 /* --- ekle seçici --- */
@@ -830,7 +841,7 @@ function fieldHTML(f,v){
   if(f.type==="list"){ let vals=Array.isArray(v[f.k])?v[f.k]:String(v[f.k]||"").split(/[\s,;]+/).filter(Boolean); if(!vals.length) vals=[""];
     return `<div class="fld" data-f="${f.k}"><span class="lbl">${f.label}</span><div class="mlist" data-k="${f.k}" data-t="list">${vals.map((x,i)=>`<div class="mrow"><input type="text" autocomplete="off" autocapitalize="characters" value="${esc(x)}" placeholder="${esc(f.ph||"")}" aria-label="${esc(f.label)} ${i+1}"><button type="button" class="iconbtn" data-act="list-del" data-k="${f.k}" data-i="${i}" aria-label="Sil">${svg('<path d="M18 6L6 18M6 6l12 12"/>',14)}</button></div>`).join("")}</div><button class="btn sm" type="button" data-act="list-add" data-k="${f.k}" style="align-self:flex-start">+ ${f.addLabel}</button>${f.hint?`<span class="hint">${f.hint}</span>`:""}</div>`; }
   if(f.type==="files"){ const fs=v.__files||[];
-    return `<div class="fld" data-f="files"><span class="lbl">${f.label}</span>${assets&&canWrite?`<div class="upl"><label class="btn sm pri">${svg(IC_CAM,15)}Fotoğraf çek<input type="file" accept="image/*" capture="environment" hidden data-ffile="1"></label><label class="btn sm">${svg(IC_IMG,15)}Galeri / PDF<input type="file" accept="image/*,application/pdf" multiple hidden data-ffile="1"></label></div>${fs.length?`<div class="chips" style="flex-wrap:wrap">${fs.map((x,i)=>`<span class="chip" aria-pressed="false">${esc(x.name||"fotoğraf")}<button type="button" class="xbtn" data-act="ffile-del" data-i="${i}" aria-label="Kaldır">×</button></span>`).join("")}</div>`:""}${fs.length&&window.__fn&&AI_KIND?`<button class="btn sm ai" type="button" data-act="ai-fill">${svg(IC_SPARK,15)}Belgeden formu doldur</button>`:""}<span class="hint">${f.hint||(window.__fn&&AI_KIND?"Fotoğrafı ekleyip “Belgeden formu doldur” dersen bilgileri yapay zekâ okur; sen kontrol edip kaydedersin.":"Kaydedince fotoğraf tarayıcıda düzeltilip PDF olarak eklenir.")}</span>`:`<span class="hint">Belge ekleme bu görünümde kullanılamıyor.</span>`}</div>`; }
+    return `<div class="fld" data-f="files"><span class="lbl">${f.label}</span>${assets&&canWrite?`<div class="upl"><label class="btn sm pri">${svg(IC_CAM,15)}Fotoğraf çek<input type="file" accept="image/*" capture="environment" hidden data-ffile="1"></label><label class="btn sm">${svg(IC_IMG,15)}Galeri / PDF<input type="file" accept="image/*,application/pdf" multiple hidden data-ffile="1"></label><button type="button" class="btn sm" data-act="paste-doc">${svg('<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>',14)}Yapıştır</button></div>${fs.length?`<div class="chips" style="flex-wrap:wrap">${fs.map((x,i)=>`<span class="chip" aria-pressed="false">${esc(x.name||"fotoğraf")}<button type="button" class="xbtn" data-act="ffile-del" data-i="${i}" aria-label="Kaldır">×</button></span>`).join("")}</div>`:""}${fs.length&&window.__fn&&AI_KIND?`<button class="btn sm ai" type="button" data-act="ai-fill">${svg(IC_SPARK,15)}Belgeden formu doldur</button>`:""}<span class="hint">${f.hint||(window.__fn&&AI_KIND?"Fotoğrafı ekleyip “Belgeden formu doldur” dersen bilgileri yapay zekâ okur; sen kontrol edip kaydedersin.":"Kaydedince fotoğraf tarayıcıda düzeltilip PDF olarak eklenir.")}</span>`:`<span class="hint">Belge ekleme bu görünümde kullanılamıyor.</span>`}</div>`; }
   if(f.type==="note") return `<div class="fnote" data-f="${f.k}">${f.text}</div>`;
   if(f.type==="lotitems") return lotItemsHTML(f,v);
   if(f.type==="saleitems") return saleItemsHTML(f,v);
@@ -979,9 +990,9 @@ const listSel = (k,lk,label,extra={}) => ({k,label,type:"select",quick:lk,quickL
 function lotForm(l){
   const isNew=!l;
   const v=l?{...l,items:l.items.map(it=>({...it})),ortakOn:l.ortak?.on?"1":"0",partnerId:l.ortak?.partnerId||"",share:l.ortak?.share??50,supplierId:l.supplierId||""}
-           :{firmId:defFirm(),status:"siparis",incoterm:"CIF Mersin",orderDate:today(),cur:"USD",priceUnit:"kg",items:[{}],ortakOn:"0",share:50,cntNos:[""]};
+           :{firmId:defFirm(),status:"siparis",transport:"gemi",incoterm:"CIF Mersin",orderDate:today(),cur:"USD",priceUnit:"kg",items:[{}],ortakOn:"0",share:50,cntNos:[""]};
   if(l) v.cntNos=cntList(l).length?cntList(l):[""];
-  const shipKeys=["carrier","bl","booking","eta","loadDate","arriveDate","vessel","note","invoiceNo","payDue"];
+  const shipKeys=["carrier","bl","booking","eta","loadDate","arriveDate","vessel","note","invoiceNo","payDue","trucker","cmr"];
   openForm({title:isNew?"Yeni alım":"Alımı düzenle", values:v, docTarget:l?{col:"lots",id:l.id}:null, aiKind:"lot", fields:[
     {k:"files",type:"files",label:"Alış faturası / proforma"},
     {section:"Alım"},
@@ -995,11 +1006,13 @@ function lotForm(l){
     {k:"share",label:"Bizim kâr payımız (%)",type:"num",half:true,showIf:x=>x.ortakOn==="1",req:true},
     {k:"onote",type:"note",showIf:x=>x.ortakOn==="1",text:"Mal bizim firmamız üzerine alınır, alış ve masrafları biz öderiz. Ortak malı orada satar; sen ortağın satışlarını bu alıma girersin. Sistem ortağın sana göndermesi gerekeni hesaplar: <b>sermaye + bizim masraflar + kâr payımız</b>. Gelen havaleleri bu alımın sayfasından girersin."},
     {details:"Sevkiyat, tarihler ve not (sonra da girebilirsin)",open:x=>shipKeys.some(k=>x[k])||(x.cntNos||[]).some(Boolean)},
-    {k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)]),ph:"COSCO, MSC…"},
-    {k:"cnt",label:"Konteyner sayısı",type:"num",half:true},
-    {k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",ph:"MSCU1234567"},
-    {k:"bl",label:"Konşimento (B/L) no",half:true},
-    {k:"booking",label:"Booking no",half:true},
+    TRANSPORT_SEG,
+    {k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)]),ph:"COSCO, MSC…",showIf:x=>!isTir(x)},
+    {k:"cnt",label:"Konteyner sayısı",type:"num",half:true,showIf:x=>!isTir(x)},
+    {k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",ph:"MSCU1234567",showIf:x=>!isTir(x)},
+    {k:"bl",label:"Konşimento (B/L) no",half:true,showIf:x=>!isTir(x)},
+    {k:"booking",label:"Booking no",half:true,showIf:x=>!isTir(x)},
+    ...tirFields(),
     {k:"orderDate",label:"Sipariş tarihi",type:"date",half:true},
     {k:"eta",label:"Tahmini varış",type:"date",half:true},
     {k:"loadDate",label:"Yükleme tarihi",type:"date",half:true},
@@ -1029,7 +1042,7 @@ function lotForm(l){
     if(x.cur==="TL") rememberKur(x.kur);
     const doc={...(l||{})}; delete doc.id; for(const k of ["product","kg","price","ppk","supplier","model"]) delete doc[k];
     Object.assign(doc,{firmId:x.firmId,supplierId:x.supplierId,origin:x.origin||"",items,priceUnit:x.priceUnit||"kg",cur:x.cur,kur:x.cur==="TL"?x.kur:null,incoterm:x.incoterm||"",ortak,
-      status:l?l.status:"siparis",cntNos:(x.cntNos||[]).filter(Boolean),bl:(x.bl||"").toUpperCase(),booking:(x.booking||"").toUpperCase(),carrier:x.carrier||"",vessel:x.vessel||l?.vessel||"",orderDate:x.orderDate||"",loadDate:x.loadDate||"",eta:x.eta||"",arriveDate:x.arriveDate||"",invoiceNo:(x.invoiceNo||"").trim(),payDue:x.payDue||"",note:x.note||""});
+      status:l?l.status:"siparis",cntNos:(x.cntNos||[]).filter(Boolean),bl:(x.bl||"").toUpperCase(),booking:(x.booking||"").toUpperCase(),carrier:x.carrier||"",vessel:x.vessel||l?.vessel||"",transport:x.transport==="tir"?"tir":"gemi",trucker:(x.trucker||"").trim(),cmr:(x.cmr||"").trim().toUpperCase(),plates:(x.plates||[]).map(p=>p.trim().toUpperCase()).filter(Boolean),orderDate:x.orderDate||"",loadDate:x.loadDate||"",eta:x.eta||"",arriveDate:x.arriveDate||"",invoiceNo:(x.invoiceNo||"").trim(),payDue:x.payDue||"",note:x.note||""});
     doc.cnt=Math.max(doc.cntNos.length,+x.cnt||0);
     const sd={...(doc.statusDates||{})};
     if(isNew){ doc.code=nextCode(x.orderDate); sd.siparis=x.orderDate||today(); doc.log=addLog({},"Alım oluşturuldu"); }
@@ -1052,17 +1065,17 @@ function stepTo(id,k){
   if(STI[k]<STI[l.status]) return setStatus(id,k);
   if(k==="onodeme") return payForm(null,{dir:"out",lotId:id,kind:"Ön ödeme",title:"Ön ödeme ne kadar?"});
   const F={
-    yuklendi:{title:"Yüklendi",fields:[{k:"loadDate",label:"Yükleme tarihi",type:"date",half:true,def:today()},{k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)])},{k:"cnt",label:"Konteyner sayısı",type:"num",half:true},{k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",ph:"MSCU1234567"},{k:"bl",label:"Konşimento (B/L) no",half:true},{k:"booking",label:"Booking no",half:true},{k:"eta",label:"Tahmini varış",type:"date",half:true},{k:"files",type:"files",label:"Konşimento / packing list",hint:"İsteğe bağlı."}],docKind:"Konşimento (B/L)"},
-    yolda:{title:"Yolda",fields:[{k:"eta",label:"Tahmini Mersin varışı",type:"date"},{k:"carrier",label:"Gemi firması",list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)])}]},
+    yuklendi:{title:"Yüklendi",fields:[TRANSPORT_SEG,{k:"loadDate",label:"Yükleme tarihi",type:"date",half:true,def:today()},{k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)]),showIf:x=>!isTir(x)},{k:"cnt",label:"Konteyner sayısı",type:"num",half:true,showIf:x=>!isTir(x)},{k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",ph:"MSCU1234567",showIf:x=>!isTir(x)},{k:"bl",label:"Konşimento (B/L) no",half:true,showIf:x=>!isTir(x)},{k:"booking",label:"Booking no",half:true,showIf:x=>!isTir(x)},...tirFields(),{k:"eta",label:"Tahmini varış",type:"date",half:true},{k:"files",type:"files",label:"Konşimento / CMR / packing list",hint:"İsteğe bağlı."}],docKind:l.transport==="tir"?"CMR / taşıma belgesi":"Konşimento (B/L)"},
+    yolda:{title:"Yolda",fields:[{k:"eta",label:"Tahmini Mersin varışı",type:"date"},l.transport==="tir"?{k:"trucker",label:"Nakliye firması",list:()=>uniq(S.lots.map(z=>z.trucker))}:{k:"carrier",label:"Gemi firması",list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)])}]},
     depoda:{title:"Mersin Serbest Bölge'ye geldi",fields:[{k:"arriveDate",label:"Varış tarihi",type:"date",def:today()}]},
   }[k];
   if(!F) return setStatus(id,k);
-  const v={loadDate:l.loadDate||(k==="yuklendi"?today():""),carrier:l.carrier||"",cnt:l.cnt||"",cntNos:cntList(l).length?cntList(l):[""],bl:l.bl||"",booking:l.booking||"",eta:l.eta||"",arriveDate:l.arriveDate||(k==="depoda"?today():"")};
+  const v={transport:l.transport||"gemi",trucker:l.trucker||"",cmr:l.cmr||"",plates:(l.plates||[]).length?l.plates:[""],loadDate:l.loadDate||(k==="yuklendi"?today():""),carrier:l.carrier||"",cnt:l.cnt||"",cntNos:cntList(l).length?cntList(l):[""],bl:l.bl||"",booking:l.booking||"",eta:l.eta||"",arriveDate:l.arriveDate||(k==="depoda"?today():"")};
   openForm({title:`${l.code} · ${F.title}`,values:v,fields:F.fields,docTarget:{col:"lots",id},docKind:F.docKind,
     onChange:(x,f)=>syncCntRows(f,x.cnt),
     onSave: async x=>{
       const upd={status:k,statusDates:{...(l.statusDates||{}),[k]:x.loadDate&&k==="yuklendi"?x.loadDate:x.arriveDate&&k==="depoda"?x.arriveDate:today()},log:addLog(l,`Aşama: ${ST[STI[l.status]].t} → ${ST[STI[k]].t}`),updatedAt:new Date().toISOString(),updatedBy:me||null};
-      for(const f of F.fields){ if(!f.k||f.type==="files") continue; let val=x[f.k]; if(f.k==="cntNos") val=(val||[]).filter(Boolean); if(f.k==="bl"||f.k==="booking") val=(val||"").toUpperCase(); if(val!==undefined&&val!==null&&f.k!=="cnt") upd[f.k]=val; }
+      for(const f of F.fields){ if(!f.k||f.type==="files") continue; let val=x[f.k]; if(f.k==="cntNos"||f.k==="plates") val=(val||[]).map(z=>z.trim().toUpperCase()).filter(Boolean); if(f.k==="bl"||f.k==="booking"||f.k==="cmr") val=(val||"").toUpperCase(); if(val!==undefined&&val!==null&&f.k!=="cnt") upd[f.k]=val; }
       if(F.fields.some(f=>f.k==="cnt")) upd.cnt=Math.max((upd.cntNos||[]).length,+x.cnt||0);
       await db.doc("lots/"+id).update(upd);
     }});
@@ -1762,6 +1775,72 @@ function firmForm(k){
   }});
 }
 
+/* --- panodan belge yapıştırma (bilgisayarda Ctrl/Cmd+V, telefonda "Yapıştır") --- */
+const DETAIL_COL={lot:"lots",sale:"sales",pay:"pays",exp:"exps"};
+function pasteTarget(){
+  const top=S.stack[S.stack.length-1]; if(!top||!assets||!canWrite) return null;
+  if(top.type==="form") return top.o.fields.some(f=>f.type==="files")?{form:top}:null;
+  if(top.type==="beyan") return {form:null,beyan:top};
+  const col=DETAIL_COL[top.type]; return col&&colArr(col).some(x=>x.id===top.id)?{col,id:top.id}:null;
+}
+function addPasted(files){
+  files=files.filter(f=>f&&((f.type||"").startsWith("image/")||f.type==="application/pdf")); if(!files.length) return false;
+  const t=pasteTarget(); if(!t){ toast("Belge yapıştırmak için önce bir alım, satış, ödeme ya da masraf aç."); return true; }
+  const stamp=new Date().toISOString().slice(0,19).replace(/[T:]/g,"-");
+  files=files.map((f,i)=>f.name&&f.name!=="image.png"?f:new File([f],`yapistirilan-${stamp}${i?"-"+i:""}.${f.type==="application/pdf"?"pdf":(f.type.split("/")[1]||"png")}`,{type:f.type}));
+  if(t.form){ t.form.v={...t.form.v,...readForm()}; t.form.v.__files=[...(t.form.v.__files||[]),...files]; renderSheet(); toast(files.length>1?`${files.length} belge eklendi, kaydedince yüklenir`:"Belge eklendi, kaydedince yüklenir"); return true; }
+  if(t.beyan){ t.beyan.files=[...(t.beyan.files||[]),...files]; renderSheet(); return true; }
+  handleFiles(t.col,t.id,files,document.getElementById("dkind")?.value||DOCK[t.col][0]); return true;
+}
+async function pasteFromClipboard(){
+  if(!navigator.clipboard?.read){ return toast("Bu tarayıcı panoya erişemiyor. Bilgisayarda Ctrl+V (Mac'te Cmd+V) ile yapıştırabilirsin."); }
+  try{
+    const items=await navigator.clipboard.read(); const files=[];
+    for(const it of items){ const tp=it.types.find(x=>x.startsWith("image/")||x==="application/pdf"); if(tp){ const b=await it.getType(tp); files.push(new File([b],"",{type:tp})); } }
+    if(!addPasted(files)) toast("Panoda resim ya da PDF yok. Belgeyi (fotoğrafı) kopyalayıp tekrar dene.");
+  }catch(e){ toast(e?.name==="NotAllowedError"?"Pano izni verilmedi. Tekrar basıp “Yapıştır”a dokun.":"Panodan okunamadı. Belgeyi kopyalayıp tekrar dene."); }
+}
+document.addEventListener("paste",e=>{
+  if(e.target.closest?.("input:not([type=file]),textarea")&&![...(e.clipboardData?.items||[])].some(i=>i.kind==="file")) return;
+  const files=[...(e.clipboardData?.files||[])];
+  if(files.length&&addPasted(files)) e.preventDefault();
+});
+/* --- ürün sayfası: gümrük beyannameleri --- */
+function prodBeyans(pid){
+  const out=[];
+  for(const l of S.lots) if(lotHasProd(l,pid)) (l.docs||[]).forEach((d,i)=>{ if(isBeyan(d)) out.push({col:"lots",rec:l,i,d,date:(d.at||"").slice(0,10)||l.arriveDate||l.orderDate,t:`Alım ${l.code} · ${lotSupplier(l)}`,sub:l.items.filter(it=>matchProd(it,pid)).map(it=>`${it.model||""} ${nf0.format(+it.kg||0)} kg`).join(", ")}); });
+  for(const x of S.sales) if(saleHasProd(x,pid)) (x.docs||[]).forEach((d,i)=>{ if(isBeyan(d)) out.push({col:"sales",rec:x,i,d,date:(d.at||"").slice(0,10)||x.date,t:`Satış ${fd(x.date)} · ${saleCustomer(x)}`,sub:`${MK[x.market]||""} · ${saleLinesTxt(x)}`}); });
+  return out.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+}
+function beyanSec(pid){
+  const bs=prodBeyans(pid);
+  const th=d=>d.thumb?`<span class="th"><img ${blobA(d.thumb)} alt="" loading="lazy"></span>`:d.ct==="application/pdf"?`<span class="th">PDF</span>`:`<span class="th"><img ${blobA(d.id)} alt="" loading="lazy"></span>`;
+  return `<div class="dsec"><div class="h"><h4>Gümrük beyannameleri</h4>${assets&&canWrite?`<button class="btn sm pri" type="button" data-act="beyan-add" data-pid="${pid}">+ Beyanname ekle</button>`:""}</div>
+    ${bs.length?`<div class="panel rows">${bs.map(b=>`<button type="button" class="row beyrow" data-lbdoc="${b.col}|${b.rec.id}|${b.i}">${th(b.d)}<span class="main"><div class="t">${esc(b.t)}</div><div class="sub">${esc(b.sub)}${b.d.name&&!/^yapistirilan|^tarama/i.test(b.d.name)?" · "+esc(b.d.name):""}</div></span><span class="end"><div class="b">${fd(b.date)}</div></span></button>`).join("")}</div>`
+      :`<div class="muted" style="font-size:13px">Bu ürünün beyannamesi yok. Beyannameyi “+ Beyanname ekle”den ya da alım/satış sayfasında belge türü “Gümrük beyannamesi” seçerek eklersin; hepsi burada tarihe göre listelenir.</div>`}</div>`;
+}
+function sBeyan(t){
+  const pid=t.pid, p=prodList().find(x=>x.id===pid);
+  const opts=[...S.sales.filter(x=>saleHasProd(x,pid)).sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(x=>[`sales|${x.id}`,`Satış ${fd(x.date)} · ${saleCustomer(x)} · ${saleLinesTxt(x)}`]),
+    ...S.lots.filter(l=>lotHasProd(l,pid)).sort((a,b)=>String(b.code).localeCompare(String(a.code))).map(l=>[`lots|${l.id}`,`Alım ${l.code} · ${lotSupplier(l)} · ${ST[STI[l.status]]?.t||""}`])];
+  if(!t.target&&opts.length) t.target=opts[0][0];
+  const fs=t.files||[];
+  const body=`<p class="muted" style="margin:0;font-size:14px">Beyanname hangi satışa ya da alıma ait? Satıştaki çıkış beyannamesi için satışı, Mersin'e giriş beyannamesi için alımı seç.</p>
+    ${opts.length?`<div class="fld"><span class="lbl">Kayıt</span><select id="beyt">${opts.map(([v,l])=>`<option value="${v}" ${v===t.target?"selected":""}>${esc(l)}</option>`).join("")}</select></div>
+    <div class="fld"><span class="lbl">Beyanname</span><div class="upl"><label class="btn sm pri">${svg(IC_CAM,15)}Fotoğraf çek<input type="file" accept="image/*" capture="environment" hidden data-beyfile="1"></label><label class="btn sm">${svg(IC_IMG,15)}Galeri / PDF<input type="file" accept="image/*,application/pdf" multiple hidden data-beyfile="1"></label><button type="button" class="btn sm" data-act="paste-doc">${svg('<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>',14)}Yapıştır</button></div>
+    ${fs.length?`<div class="chips" style="flex-wrap:wrap">${fs.map((x,i)=>`<span class="chip">${esc(x.name||"belge")}<button type="button" class="xbtn" data-act="bey-del" data-i="${i}" aria-label="Kaldır">×</button></span>`).join("")}</div>`:""}
+    <span class="hint">Fotoğraflar tarayıcıda düzeltilip PDF'e çevrilir; PDF olduğu gibi eklenir. Bilgisayarda Ctrl/Cmd+V ile de yapıştırabilirsin.</span></div>`
+    :`<div class="empty">Bu ürünün henüz alımı ya da satışı yok.</div>`}`;
+  const foot=`<button class="btn" type="button" data-act="back">Vazgeç</button><span class="sp"></span><button class="btn pri" type="button" data-act="bey-save" ${fs.length?"":"disabled"}>Ekle</button>`;
+  return {title:`${esc(p?.name||"")} · beyanname ekle`,body,foot};
+}
+async function beyanSave(){
+  const t=S.stack[S.stack.length-1]; if(t?.type!=="beyan"||!(t.files||[]).length) return;
+  const [col,id]=(document.getElementById("beyt")?.value||t.target||"").split("|"); if(!id) return;
+  const files=t.files; S.stack.pop();
+  openSheet({type:col==="lots"?"lot":"sale",id});
+  handleFiles(col,id,files,"Gümrük beyannamesi");
+}
 /* ---------- telefona bildirim ---------- */
 const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 const isStandalone = () => window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone===true;
@@ -1846,6 +1925,10 @@ document.addEventListener("click",e=>{
       renderSheet(); if(a==="list-add"){ const ins=document.querySelectorAll(`.mlist[data-k="${d.k}"] input`); ins[ins.length-1]?.focus(); } return; }
     if(a==="ai-fill") return aiFill(t);
     if(a==="quick-go") return quickGo(t);
+    if(a==="paste-doc") return pasteFromClipboard();
+    if(a==="beyan-add") return openSheet({type:"beyan",pid:d.pid,files:[]});
+    if(a==="bey-del"){ const top=S.stack[S.stack.length-1]; top.target=document.getElementById("beyt")?.value||top.target; top.files=(top.files||[]).filter((_,i)=>i!==+d.i); return renderSheet(); }
+    if(a==="bey-save") return beyanSave();
     if(a==="quick-ex"){ const ta=document.getElementById("qtext"); if(ta){ ta.value=t.textContent; S.qtext=ta.value; ta.focus(); } return; }
     if(a.startsWith("pdf-")&&a!=="pdf-invoice"&&a!=="pdf-statement") return pdfAct(a,t);
     if(a==="ai-party") return aiAddParty();
@@ -1923,7 +2006,9 @@ document.addEventListener("input",e=>{
   if(e.target.id==="aq"||e.target.id==="pq"){ const id=e.target.id; if(id==="aq") S.q=e.target.value; else S.pq=e.target.value; clearTimeout(qT); qT=setTimeout(()=>{ const pos=e.target.selectionStart; render(); const el=document.getElementById(id); if(el){ el.focus(); try{el.setSelectionRange(pos,pos);}catch(_){} } },180); }
 });
 document.addEventListener("change",e=>{ if(e.target.id==="ay"){ S.year=e.target.value; render(); } if(e.target.matches("input[data-upload]")) uploadDocs(e.target); if(e.target.matches("input[data-scan]")) startScan(e.target);
-  if(e.target.matches("input[data-ffile]")){ const top=S.stack[S.stack.length-1]; const fs=[...e.target.files]; e.target.value=""; if(top?.type==="form"&&fs.length){ top.v={...top.v,...readForm()}; top.v.__files=[...(top.v.__files||[]),...fs]; renderSheet(); } } if(e.target.matches("input[data-scanadd]")) scanAddPage(e.target); });
+  if(e.target.matches("input[data-ffile]")){ const top=S.stack[S.stack.length-1]; const fs=[...e.target.files]; e.target.value=""; if(top?.type==="form"&&fs.length){ top.v={...top.v,...readForm()}; top.v.__files=[...(top.v.__files||[]),...fs]; renderSheet(); } } if(e.target.matches("input[data-scanadd]")) scanAddPage(e.target);
+  if(e.target.matches("input[data-beyfile]")){ const top=S.stack[S.stack.length-1]; const fs=[...e.target.files]; e.target.value=""; if(top?.type==="beyan"&&fs.length){ top.target=document.getElementById("beyt")?.value||top.target; top.files=[...(top.files||[]),...fs]; renderSheet(); } }
+  if(e.target.id==="beyt"){ const top=S.stack[S.stack.length-1]; if(top?.type==="beyan") top.target=e.target.value; } });
 document.getElementById("addbtn").addEventListener("click",()=>openSheet({type:"choose"}));
 document.getElementById("fab").addEventListener("click",()=>openSheet({type:"choose"}));
 document.getElementById("setbtn").addEventListener("click",()=>openSheet({type:"settings"}));

@@ -560,8 +560,9 @@ async function doBildirim() {
   for (const l of M.lots) {
     if ((l.status === "yuklendi" || l.status === "yolda") && l.eta) {
       const d = daysTo(l.eta);
-      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: d === 0 ? "Konteyner bugün Mersin'de" : `Konteyner ${d === 1 ? "yarın" : "3 gün sonra"} Mersin'de`, body: `${lotLabel(l)}${l.carrier ? " · " + l.carrier : ""}`, url: `./#lot=${l.id}` });
-      else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `Varış ${-d} gün gecikti`, body: `${lotLabel(l)} · gemi firmasından kontrol et`, url: `./#lot=${l.id}` });
+      const tir = l.transport === "tir", w = tir ? "TIR" : "Konteyner", via = tir ? [l.trucker, ...(l.plates || [])].filter(Boolean).join(" · ") : l.carrier;
+      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: d === 0 ? `${w} bugün Mersin'de` : `${w} ${d === 1 ? "yarın" : "3 gün sonra"} Mersin'de`, body: `${lotLabel(l)}${via ? " · " + via : ""}`, url: `./#lot=${l.id}` });
+      else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `Varış ${-d} gün gecikti`, body: `${lotLabel(l)} · ${tir ? "nakliyeciden" : "gemi firmasından"} kontrol et`, url: `./#lot=${l.id}` });
     }
     const c = M.lotC.get(l.id);
     if (l.payDue && c && c.due > 1) {
