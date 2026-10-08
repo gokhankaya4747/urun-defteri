@@ -132,14 +132,15 @@ function model(rows: { col: string; id: string; data: any }[]) {
   const pname = (id?: string, fb?: string) => (id && parties[id]?.name) || fb || "—";
   const prodName = (it: any) => (it.productId ? products[it.productId]?.name : it.product) || "—";
   const items = new Map<string, any>();
-  for (const l of lots) for (const it of l.items) items.set(l.id + "|" + it.k, { lot: l, it, sold: 0, cu: usd(+it.ppk || 0, l.cur, l.kur) });
+  for (const l of lots) for (const it of l.items) items.set(l.id + "|" + it.k, { lot: l, it, sold: 0, irakIn: 0, soldIrak: 0, cu: usd(+it.ppk || 0, l.cur, l.kur) });
+  for (const l of lots) for (const sv of (l.sevk || [])) for (const ln of (sv.lines || [])) { const ci = items.get(l.id + "|" + ln.ik); if (ci) ci.irakIn += +ln.kg || 0; }
   const eSale = new Map<string, { us: number; p: number }>(), eLot = new Map<string, { us: number; p: number }>();
   for (const x of exps) { const m = x.saleId ? eSale : x.lotId ? eLot : null; if (!m) continue; const k = x.saleId || x.lotId; const b = m.get(k) || { us: 0, p: 0 }; b[x.paidBy === "ortak" ? "p" : "us"] += usd(x.amount, x.cur, x.kur); m.set(k, b); }
   const acc = new Map(lots.map((l: any) => [l.id, { soldKg: 0, soldCost: 0, rev: 0, expUs: 0, expP: 0, lastSale: "" }]));
   const saleC = new Map<string, any>();
   for (const s of sales) {
     let tot = 0, kg = 0, olot: any = null; const lines: any[] = [];
-    for (const ln of s.items) { const amt = (+ln.kg || 0) * (+ln.ppk || 0); tot += amt; kg += +ln.kg || 0; const ci = items.get(ln.lotId + "|" + ln.ik); if (ci) { ci.sold += +ln.kg || 0; if (ci.lot.ortak?.on) olot = ci.lot; } lines.push({ ln, ci, amtUSD: usd(amt, s.cur, s.kur) }); }
+    for (const ln of s.items) { const amt = (+ln.kg || 0) * (+ln.ppk || 0); tot += amt; kg += +ln.kg || 0; const ci = items.get(ln.lotId + "|" + ln.ik); if (ci) { ci.sold += +ln.kg || 0; if (ln.loc === "irak") ci.soldIrak += +ln.kg || 0; if (ci.lot.ortak?.on) olot = ci.lot; } lines.push({ ln, ci, amtUSD: usd(amt, s.cur, s.kur) }); }
     const totUSD = usd(tot, s.cur, s.kur);
     const got = sum(pays.filter((p: any) => p.dir === "in" && p.saleId === s.id), (p: any) => usd(p.amount, p.cur, p.kur));
     const e = eSale.get(s.id) || { us: 0, p: 0 };
@@ -223,8 +224,10 @@ function digestHtml(M: ReturnType<typeof model>) {
   const stock = new Map<string, Map<string, { kg: number; cost: number }>>();
   for (const ci of M.items.values()) {
     if (ci.lot.status !== "depoda") continue; const left = (+ci.it.kg || 0) - ci.sold; if (left <= 0) continue;
+    const irak = Math.max(0, ci.irakIn - ci.soldIrak), here = left - irak;
     const p = M.prodName(ci.it); if (!stock.has(p)) stock.set(p, new Map());
-    const m = stock.get(p)!; const k = ci.it.model || "—"; const r = m.get(k) || { kg: 0, cost: 0 }; r.kg += left; r.cost += left * ci.cu; m.set(k, r);
+    const m = stock.get(p)!;
+    for (const [k, kg] of [[ci.it.model || "—", here], [`${ci.it.model || "—"} · Irak deposu`, irak]] as [string, number][]) { if (kg <= 0) continue; const r = m.get(k) || { kg: 0, cost: 0 }; r.kg += kg; r.cost += kg * ci.cu; m.set(k, r); }
   }
   // borç / alacak
   const sup = new Map<string, { a: number; p: number }>(), cus = new Map<string, { a: number; p: number; oldest: string }>();
