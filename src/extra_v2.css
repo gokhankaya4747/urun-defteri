@@ -136,3 +136,11 @@ button.trk{font-family:inherit;cursor:pointer}
 .pzone .pz-box:focus{border-color:var(--accent);background:var(--accent-soft)}
 .pzone .pz-box img{max-width:100%;max-height:100px}
 .typeic.tir{background:var(--accent-soft);color:var(--accent)}
+/* banka / kasa */
+.accs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.acc{display:flex;flex-direction:column;gap:4px;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:14px;cursor:pointer;font:inherit;color:inherit}
+.acc:hover{border-color:var(--accent)}
+.acc .an{font-weight:600}
+.acc .ab{font:700 22px/1.2 var(--f-disp)}
+.acc .ab.bad{color:var(--bad)}
+.acc .as{font-size:12px}
