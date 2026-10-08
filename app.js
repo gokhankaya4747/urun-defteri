@@ -1792,18 +1792,56 @@ function addPasted(files){
   if(t.beyan){ t.beyan.files=[...(t.beyan.files||[]),...files]; renderSheet(); return true; }
   handleFiles(t.col,t.id,files,document.getElementById("dkind")?.value||DOCK[t.col][0]); return true;
 }
-async function pasteFromClipboard(){
-  if(!navigator.clipboard?.read){ return toast("Bu tarayıcı panoya erişemiyor. Bilgisayarda Ctrl+V (Mac'te Cmd+V) ile yapıştırabilirsin."); }
-  try{
-    const items=await navigator.clipboard.read(); const files=[];
-    for(const it of items){ const tp=it.types.find(x=>x.startsWith("image/")||x==="application/pdf"); if(tp){ const b=await it.getType(tp); files.push(new File([b],"",{type:tp})); } }
-    if(!addPasted(files)) toast("Panoda resim ya da PDF yok. Belgeyi (fotoğrafı) kopyalayıp tekrar dene.");
-  }catch(e){ toast(e?.name==="NotAllowedError"?"Pano izni verilmedi. Tekrar basıp “Yapıştır”a dokun.":"Panodan okunamadı. Belgeyi kopyalayıp tekrar dene."); }
+/* Panodaki dosyaları paste olayından topla: dosya, öğe ya da HTML içindeki gömülü resim */
+async function clipFiles(cd){
+  if(!cd) return [];
+  let files=[...(cd.files||[])];
+  if(!files.length) files=[...(cd.items||[])].filter(i=>i.kind==="file").map(i=>i.getAsFile()).filter(Boolean);
+  if(!files.length){ const html=cd.getData?.("text/html")||""; const m=[...html.matchAll(/<img[^>]+src="(data:(image\/[a-z+]+|application\/pdf);base64,[^"]+)"/gi)];
+    for(const x of m){ try{ const b=await (await fetch(x[1])).blob(); files.push(new File([b],"",{type:x[2]})); }catch(_){} } }
+  return files;
 }
-document.addEventListener("paste",e=>{
-  if(e.target.closest?.("input:not([type=file]),textarea")&&![...(e.clipboardData?.items||[])].some(i=>i.kind==="file")) return;
-  const files=[...(e.clipboardData?.files||[])];
-  if(files.length&&addPasted(files)) e.preventDefault();
+const PASTE_HINT = () => /iphone|ipad|android/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1) ? "Kutuya <b>uzun bas</b> ve çıkan menüden <b>Yapıştır</b>'a dokun." : `Kutuya tıklayıp <b>${/mac/i.test(navigator.platform)?"Cmd":"Ctrl"}+V</b>'ye bas.`;
+function pasteZone(note){
+  document.getElementById("pzone")?.remove();
+  const el=document.createElement("div"); el.id="pzone"; el.className="lbox pzone"; el.setAttribute("role","dialog"); el.setAttribute("aria-label","Belge yapıştır");
+  el.innerHTML=`<div class="pz-card"><b>Belgeyi buraya yapıştır</b>${note?`<p class="muted">${note}</p>`:""}
+    <div class="pz-box" contenteditable="true" inputmode="none" aria-label="Yapıştırma alanı"><span>${PASTE_HINT()}</span></div>
+    <p class="muted" style="font-size:13px;margin:0">Kopyaladığın fotoğraf, ekran görüntüsü ya da PDF dosyası olabilir.</p>
+    <div style="display:flex;justify-content:flex-end"><button class="btn" type="button" data-pz="close">Vazgeç</button></div></div>`;
+  document.body.appendChild(el);
+  const box=el.querySelector(".pz-box"); const close=()=>{ el.remove(); document.removeEventListener("keydown",k,true); };
+  const k=e=>{ if(e.key==="Escape"){ e.stopPropagation(); close(); } }; document.addEventListener("keydown",k,true);
+  el.addEventListener("click",e=>{ if(e.target.closest('[data-pz="close"]')||e.target===el) close(); });
+  box.addEventListener("focus",()=>{ box.innerHTML=""; },{once:true});
+  box.addEventListener("paste",async e=>{
+    e.preventDefault(); e.stopPropagation();
+    const files=await clipFiles(e.clipboardData);
+    if(files.length&&addPasted(files)) return close();
+    const types=[...(e.clipboardData?.types||[])].filter(t=>t!=="Files");
+    box.innerHTML=""; toast(types.includes("text/uri-list")||types.includes("text/plain")?"Panoda dosya değil yazı/bağlantı var. Dosyanın kendisini kopyala (WhatsApp'ta belgeye uzun bas → Kopyala ya da Paylaş → Kopyala).":"Panoda resim ya da PDF bulunamadı.");
+  });
+  box.addEventListener("input",()=>{ const img=box.querySelector("img[src^='data:']"); if(img){ fetch(img.src).then(r=>r.blob()).then(b=>{ if(addPasted([new File([b],"",{type:b.type})])) close(); }); } box.innerHTML=""; });
+  setTimeout(()=>box.focus(),50);
+}
+async function pasteFromClipboard(){
+  // Önce panoyu doğrudan okumayı dene (resimlerde çalışır); dosya kopyalandıysa tarayıcı bunu göremez → yapıştırma kutusunu aç
+  if(navigator.clipboard?.read){
+    try{
+      const items=await navigator.clipboard.read(); const files=[];
+      for(const it of items){ const tp=it.types.find(x=>x.startsWith("image/")||x==="application/pdf"); if(tp){ const b=await it.getType(tp); files.push(new File([b],"",{type:tp})); } }
+      if(addPasted(files)) return;
+    }catch(e){}
+  }
+  pasteZone();
+}
+document.addEventListener("paste",async e=>{
+  if(document.getElementById("pzone")) return;
+  const hasFile=[...(e.clipboardData?.items||[])].some(i=>i.kind==="file")||(e.clipboardData?.files||[]).length>0;
+  if(e.target.closest?.("input:not([type=file]),textarea,[contenteditable]")&&!hasFile) return;
+  if(!hasFile) return;
+  e.preventDefault();
+  addPasted(await clipFiles(e.clipboardData));
 });
 /* --- ürün sayfası: gümrük beyannameleri --- */
 function prodBeyans(pid){

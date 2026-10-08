@@ -127,3 +127,11 @@ td.dim{color:var(--muted)}
 .beyrow .th{flex:none;width:44px;height:58px;border-radius:6px;border:1px solid var(--line);background:var(--surface-2);display:grid;place-items:center;overflow:hidden;font:700 11px/1 var(--f-disp);color:var(--muted)}
 .beyrow .th img{width:100%;height:100%;object-fit:cover}
 button.trk{font-family:inherit;cursor:pointer}
+/* yapıştırma kutusu */
+.pzone{display:grid;place-items:center;padding:16px}
+.pzone .pz-card{background:var(--surface);color:var(--fg);border-radius:var(--r);padding:18px;width:min(440px,100%);display:flex;flex-direction:column;gap:10px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+.pzone .pz-card>b{font-size:17px}
+.pzone .pz-card p{margin:0}
+.pzone .pz-box{min-height:120px;border:2px dashed var(--line);border-radius:12px;padding:16px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:15px;outline:none;-webkit-user-select:text;user-select:text;overflow:hidden}
+.pzone .pz-box:focus{border-color:var(--accent);background:var(--accent-soft)}
+.pzone .pz-box img{max-width:100%;max-height:100px}
