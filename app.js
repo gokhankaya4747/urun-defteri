@@ -17,21 +17,31 @@ const FIRM_DEF = {a:"Asya Çerez", b:"Gökhan Altın"};
 const DEF_ORIGINS = ["İran","ABD","Afganistan","Hindistan","Vietnam","Şili","Arjantin","Brezilya","Çin","Özbekistan","Türkiye","Fildişi Sahili"];
 const DEF_EXPC = ["Irak gümrüğü","TIR navlunu (Mersin yükleme)","Gümrük müşaviri","İhracat masrafı","Serbest bölge depo / ardiye","Liman / ordino","Sigorta","Banka masrafı","Diğer"];
 const DEF_BANKS = ["Ziraat Bankası","İş Bankası","Garanti BBVA","Akbank","Yapı Kredi","Halkbank","VakıfBank","QNB","DenizBank","Kuveyt Türk","Albaraka","Türkiye Finans","Nakit"];
+/* Gemi firması takip sayfaları. deep: numara bağlantıyla gider ve sonuç doğrudan açılır (8 Eki 2026'da denendi).
+   deep olmayanlarda firmanın sitesi bağlantıdan numara almıyor: takip sayfası açılır, numara panoya kopyalanır. */
 const CARRIERS = {
-  "COSCO": (n,t)=>`https://elines.coscoshipping.com/ebusiness/cargotracking?trackingType=${t==="B/L"?"BILLOFLADING":t==="Booking"?"BOOKING":"CONTAINER"}&number=${n}`,
-  "MSC": n=>`https://www.msc.com/en/track-a-shipment?agencyPath=msc&trackingNumber=${n}`,
-  "Maersk": n=>`https://www.maersk.com/tracking/${n}`,
-  "CMA CGM": n=>`https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference=${n}`,
-  "Hapag-Lloyd": n=>`https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container=${n}`,
-  "ONE": n=>`https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${n}`,
-  "Evergreen": n=>`https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do`,
-  "ZIM": n=>`https://www.zim.com/tools/track-a-shipment?consnumber=${n}`,
-  "Yang Ming": n=>`https://www.yangming.com/e-service/track_trace/track_trace_cargo_tracking.aspx`,
-  "HMM": n=>`https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do`,
-  "OOCL": n=>`https://www.oocl.com/eng/ourservices/eservices/cargotracking/Pages/cargotracking.aspx`,
-  "Arkas": n=>`https://www.arkasline.com.tr/`,
+  "COSCO":       {deep:true, url:(n,t)=>`https://elines.coscoshipping.com/ebusiness/cargotracking?trackingType=${t==="B/L"?"BILLOFLADING":t==="Booking"?"BOOKING":"CONTAINER"}&number=${n}`, al:["cosco","coscon"], pre:["CSNU","CBHU","CCLU","CSLU","COSU","CXDU","CXRU"]},
+  "Maersk":      {deep:true, url:n=>`https://www.maersk.com/tracking/${n}`, al:["maersk","mærsk","sealand","sea land"], pre:["MSKU","MRKU","MAEU","MRSU","MSFU","MCAU","SUDU"]},
+  "ONE":         {deep:true, url:n=>`https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${n}`, al:["one","ocean network"], pre:["ONEU","ONEY","NYKU","MOLU","KKFU","TCLU"]},
+  "Hapag-Lloyd": {deep:t=>t==="Konteyner", url:(n,t)=>`https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html${t==="Konteyner"?`?container=${n}`:""}`, al:["hapag","hlag"], pre:["HLCU","HLXU","HLBU","UACU","HAMU"]},
+  "ZIM":         {deep:true, url:n=>`https://www.zim.com/tools/track-a-shipment?consnumber=${n}`, al:["zim"], pre:["ZIMU","ZCSU","ZCLU","ZMOU"]},
+  "MSC":         {url:()=>`https://www.msc.com/en/track-a-shipment`, al:["msc","mediterranean"], pre:["MSCU","MEDU","MSDU","MSMU","MSNU","MSZU"]},
+  "CMA CGM":     {url:()=>`https://www.cma-cgm.com/ebusiness/tracking`, al:["cma","cgm","apl","anl"], pre:["CMAU","CGMU","CMDU","APHU","APZU","ANNU"]},
+  "Evergreen":   {url:()=>`https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do`, al:["evergreen","shipmentlink","emc"], pre:["EGHU","EMCU","EISU","EGSU","EITU","EGLV"]},
+  "Yang Ming":   {url:()=>`https://www.yangming.com/e-service/track_trace/track_trace_cargo_tracking.aspx`, al:["yang ming","yangming"], pre:["YMLU","YMMU"]},
+  "HMM":         {url:()=>`https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do`, al:["hmm","hyundai"], pre:["HDMU","HMMU"]},
+  "OOCL":        {url:()=>`https://www.oocl.com/eng/ourservices/eservices/cargotracking/Pages/cargotracking.aspx`, al:["oocl","orient overseas"], pre:["OOLU","OOCU"]},
+  "Arkas":       {url:()=>`https://www.arkasline.com.tr/`, al:["arkas"], pre:["ARKU"]},
 };
-const trackUrl = (carrier,n,t) => { const k=Object.keys(CARRIERS).find(c=>key(c)===key(carrier)); return k ? CARRIERS[k](encodeURIComponent(n),t) : `https://www.google.com/search?q=${encodeURIComponent((carrier||"")+" container tracking "+n)}`; };
+/* firma adı serbest yazılsa da bul ("Cosco Shipping", "maersk line"); yazılmadıysa numaranın ilk 4 harfinden tahmin et */
+const carrierOf = (carrier,n) => {
+  const c=key(carrier).replace(/[^a-zçğıöşü0-9 ]/g," ").trim();
+  if(c){ const hit=Object.entries(CARRIERS).find(([k,v])=>key(k)===c||v.al.some(a=>c===a||c.startsWith(a+" ")||(a.length>3&&c.includes(a)))); if(hit) return hit[0]; }
+  const p=String(n||"").toUpperCase().slice(0,4); const hit2=Object.entries(CARRIERS).find(([,v])=>v.pre.includes(p)); return hit2?hit2[0]:null;
+};
+const trackInfo = (carrier,n,t) => { const k=carrierOf(carrier,n); if(!k) return {url:`https://www.track-trace.com/container`,deep:false,name:null};
+  const c=CARRIERS[k]; return {url:c.url(encodeURIComponent(n),t),deep:typeof c.deep==="function"?c.deep(t):!!c.deep,name:k}; };
+const trackUrl = (carrier,n,t) => trackInfo(carrier,n,t).url;
 const cntList = l => Array.isArray(l.cntNos) ? l.cntNos.filter(Boolean) : String(l.cntNos||"").split(/[\s,;]+/).filter(Boolean);
 const isTir = x => x?.transport==="tir";
 const TRANSPORT_SEG = {k:"transport",label:"Nasıl geliyor?",type:"seg",options:[["gemi","Gemi / konteyner"],["tir","TIR / kara yolu"]]};
@@ -522,7 +532,8 @@ function sLot(id){
   const track = isTir(l) ? `<div class="trackbox"><div class="tb-h"><b>TIR · ${esc(l.trucker||"nakliye firması girilmedi")}</b>${l.eta?`<span class="muted">Tahmini varış ${fd(l.eta)}${eta!==null?` · ${eta<0?`<span style="color:var(--bad)">${-eta} gün gecikti</span>`:eta===0?"bugün":eta+" gün kaldı"}`:""}</span>`:""}</div>
     ${plates.length||l.cmr?`<div class="tb-nums">${plates.map(n=>`<button type="button" class="trk" data-trackcopy="${esc(n)}"><span class="muted">Plaka</span> <span class="mono">${esc(n)}</span></button>`).join("")}${l.cmr?`<button type="button" class="trk" data-trackcopy="${esc(l.cmr)}"><span class="muted">CMR</span> <span class="mono">${esc(l.cmr)}</span></button>`:""}</div><div class="muted" style="font-size:12px">Dokununca numara kopyalanır.</div>`:`<div class="muted" style="font-size:13px">Plaka ve CMR no'yu “Düzenle”den girebilirsin.</div>`}</div>`
     : nums.length||l.carrier||l.eta ? `<div class="trackbox"><div class="tb-h"><b>${esc(l.carrier||"Gemi firması girilmedi")}</b>${l.eta?`<span class="muted">Tahmini varış ${fd(l.eta)}${eta!==null?` · ${eta<0?`<span style="color:var(--bad)">${-eta} gün gecikti</span>`:eta===0?"bugün":eta+" gün kaldı"}`:""}</span>`:""}</div>
-    ${nums.length?`<div class="tb-nums">${nums.map(([t,n])=>`<a class="trk" href="${esc(trackUrl(l.carrier,n,t))}" target="_blank" rel="noopener" data-trackcopy="${esc(n)}"><span class="muted">${t}</span> <span class="mono">${esc(n)}</span> ${svg('<path d="M7 17L17 7M9 7h8v8"/>',13)}</a>`).join("")}</div><div class="muted" style="font-size:12px">Numaraya dokununca ${esc(l.carrier||"firmanın")} takip sayfası açılır, numara da kopyalanır.</div>`:`<div class="muted" style="font-size:13px">Konteyner, B/L veya booking no girersen buradan tek dokunuşla takip edebilirsin.</div>`}</div>` : "";
+    ${nums.length?(()=>{ const ti=nums.map(([t,n])=>({t,n,...trackInfo(l.carrier,n,t)})); const nm=ti.find(x=>x.name)?.name; const allDeep=ti.every(x=>x.deep);
+      return `<div class="tb-nums">${ti.map(x=>`<a class="trk" href="${esc(x.url)}" target="_blank" rel="noopener" data-trackcopy="${esc(x.n)}" ${x.deep?"":`data-trackpaste="1"`}><span class="muted">${x.t}</span> <span class="mono">${esc(x.n)}</span> ${svg('<path d="M7 17L17 7M9 7h8v8"/>',13)}</a>`).join("")}</div><div class="muted" style="font-size:12px">${!nm?`Gemi firması bilinmiyor; genel takip sitesi açılır ve numara kopyalanır. Düzenle'den gemi firmasını yazarsan doğrudan firmanın sayfası açılır.`:allDeep?`Numaraya dokununca ${esc(nm)} sitesinde sonuç doğrudan açılır.`:`Numaraya dokununca ${esc(nm)} takip sayfası açılır ve numara kopyalanır; sayfadaki kutuya yapıştırıp ara.`}${nm&&!l.carrier?` <span>(Firma numaradan tahmin edildi: ${esc(nm)})</span>`:""}</div>`; })():`<div class="muted" style="font-size:13px">Konteyner, B/L veya booking no girersen buradan tek dokunuşla takip edebilirsin.</div>`}</div>` : "";
   const body=`<div class="dhead"><div class="code"><span>${esc(l.code||"")}</span>${stPill(l.status)}${o?`<span class="badge">Ortak alım</span>`:""}${exBadge(l)}</div><div class="ttl">${esc(lotProducts(l))}</div><div class="muted">${esc(lotSupplier(l))}${l.origin?" · "+esc(l.origin):""}</div></div>
     <div class="stepper" role="group" aria-label="Aşama">${step}</div>
     ${canWrite&&next?`<button class="btn pri" type="button" data-setst="${next.k}">${next.t} olarak işaretle →</button>`:""}
@@ -2102,7 +2113,7 @@ document.addEventListener("click",e=>{
   const mk=e.target.closest("[data-mk] [data-mv]"); if(mk){ mk.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-checked",String(b===mk))); return; }
   const nkb=e.target.closest("[data-nk] [data-nv]"); if(nkb){ nkb.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-checked",String(b===nkb))); return pushPref(nkb.parentElement.dataset.nk,nkb.dataset.nv==="1"); }
   const pkb=e.target.closest("[data-pk] [data-pv]"); if(pkb){ pkb.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-checked",String(b===pkb))); return; }
-  const tc=e.target.closest("[data-trackcopy]"); if(tc){ const n=tc.dataset.trackcopy; Promise.resolve().then(()=>navigator.clipboard.writeText(n)).then(()=>toast(`${n} kopyalandı`),()=>{}); return; }
+  const tc=e.target.closest("[data-trackcopy]"); if(tc){ const n=tc.dataset.trackcopy, ps=tc.dataset.trackpaste; Promise.resolve().then(()=>navigator.clipboard.writeText(n)).then(()=>toast(ps?`${n} kopyalandı — açılan sayfada kutuya yapıştır`:`${n} kopyalandı`),()=>{}); return; }
   const t=e.target.closest("[data-view],[data-firm],[data-prod],[data-prodsheet],[data-stage],[data-market],[data-cari],[data-atype],[data-lot],[data-sale],[data-pay],[data-exp],[data-party],[data-doc],[data-lbdoc],[data-setst],[data-copy],[data-act]");
   if(!t) return;
   const d=t.dataset;
