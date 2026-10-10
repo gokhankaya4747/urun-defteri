@@ -128,7 +128,7 @@ function model(rows: { col: string; id: string; data: any }[]) {
   const parties = Object.fromEntries(rows.filter((r) => r.col === "parties").map((r) => [r.id, r.data]));
   const lots = by("lots").map((l: any) => { if (!Array.isArray(l.items) || !l.items.length) l.items = [{ k: "i1", productId: "", product: l.product || "", model: "", kg: +l.kg || 0, price: +l.price || 0, ppk: +l.ppk || 0 }]; return l; });
   const sales = by("sales").map((s: any) => { if (!Array.isArray(s.items)) s.items = s.lotId ? [{ lotId: s.lotId, ik: "i1", kg: +s.kg || 0, ppk: +s.ppk || 0 }] : []; return s; });
-  const pays = by("pays"), exps = by("exps");
+  const pays = by("pays"), exps = by("exps"), trf = by("trf");
   const pname = (id?: string, fb?: string) => (id && parties[id]?.name) || fb || "—";
   const prodName = (it: any) => (it.productId ? products[it.productId]?.name : it.product) || "—";
   const items = new Map<string, any>();
@@ -157,7 +157,7 @@ function model(rows: { col: string; id: string; data: any }[]) {
     if (l.ortak?.on) { const sh = (+l.ortak.share || 0) / 100; const og = sum(pays.filter((p: any) => p.dir === "in" && p.lotId === l.id), (p: any) => usd(p.amount, p.cur, p.kur)); const owe = a.rev - expP - (1 - sh) * profit; Object.assign(r, { owe, odue: owe - og }); }
     lotC.set(l.id, r);
   }
-  return { firms, products, parties, lots, sales, pays, exps, items, saleC, lotC, pname, prodName };
+  return { firms, products, parties, lots, sales, pays, exps, trf, items, saleC, lotC, pname, prodName };
 }
 
 /* ---------- 2) haftalık özet + 3) yedek ---------- */
@@ -252,12 +252,13 @@ function digestHtml(M: ReturnType<typeof model>) {
     ["Tahsilat", String(wIn.length), S(wIn, (p) => usd(p.amount, p.cur, p.kur))],
     ["Masraf", String(wExp.length), S(wExp, (x) => usd(x.amount, x.cur, x.kur))],
   ], [1, 2])}`;
-  h += `<h2 style="${css.h2}">Yoldaki konteynerler</h2>`;
-  h += coming.length || noEta.length ? tbl(["Alım", "Gemi", "Tahmini varış", ""], [
-    ...coming.map((l: any) => { const d = daysTo(l.eta); return [lotLabel(l), esc(l.carrier || "—"), fd(l.eta), d < 0 ? `<b style="color:#B3261E">${-d} gün gecikti</b>` : d === 0 ? "<b>bugün</b>" : `${d} gün`]; }),
-    ...noEta.map((l: any) => [lotLabel(l), esc(l.carrier || "—"), "girilmedi", ST[l.status]]),
-  ], [3]) : `<p style="${css.muted}">Yolda konteyner yok.</p>`;
-  h += `<h2 style="${css.h2}">Mersin Serbest Bölge stoku</h2>`;
+  const via = (l: any) => esc((l.transport === "tir" ? ["TIR", l.trucker, ...(l.plates || [])] : [l.carrier]).filter(Boolean).join(" · ") || "—") + (l.dest === "irak" ? " → Irak deposu" : "");
+  h += `<h2 style="${css.h2}">Yoldaki mallar</h2>`;
+  h += coming.length || noEta.length ? tbl(["Alım", "Gemi / nakliye", "Tahmini varış", ""], [
+    ...coming.map((l: any) => { const d = daysTo(l.eta); return [lotLabel(l), via(l), fd(l.eta), d < 0 ? `<b style="color:#B3261E">${-d} gün gecikti</b>` : d === 0 ? "<b>bugün</b>" : `${d} gün`]; }),
+    ...noEta.map((l: any) => [lotLabel(l), via(l), "girilmedi", ST[l.status]]),
+  ], [3]) : `<p style="${css.muted}">Yolda mal yok.</p>`;
+  h += `<h2 style="${css.h2}">Depodaki stok (Mersin SB ve Irak deposu)</h2>`;
   h += stock.size ? [...stock].map(([p, m]) => `<div style="font-weight:bold;margin:10px 0 2px">${esc(p)}</div>${tbl(["Model", "Kalan", "Maliyet"], [...m].map(([k, r]) => [esc(k), fmt0.format(Math.round(r.kg)) + " kg", "$" + fmt2.format(r.cost / r.kg) + "/kg"]), [1, 2])}`).join("") : `<p style="${css.muted}">Serbest bölgede stok yok.</p>`;
   h += `<h2 style="${css.h2}">Tedarikçilere kalan borç</h2>` + (supRows.length ? tbl(["Tedarikçi", "Kalan"], supRows.map(([n, b]) => [esc(n), usdf(b)]), [1]) : `<p style="${css.muted}">Borç yok.</p>`);
   h += `<h2 style="${css.h2}">Müşteri alacakları</h2>` + (cusRows.length ? tbl(["Müşteri", "Kalan", "En eski"], cusRows.map(([n, b, o]) => { const g = o ? -daysTo(o) : 0; return [esc(n), usdf(b), o ? `${fd(o)}${g > 30 ? ` · <b style="color:#A8530F">${g} gün</b>` : ""}` : "—"]; }), [1]) : `<p style="${css.muted}">Açık alacak yok.</p>`);
@@ -276,10 +277,12 @@ function buildXlsx(XLSX: any, M: ReturnType<typeof model>) {
   const wb = XLSX.utils.book_new(); const r2 = (n: number) => Math.round((+n || 0) * 100) / 100;
   const add = (rows: any[], name: string) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ "": "Kayıt yok" }]), name);
   const firm = (id: string) => M.firms[id]?.name || id;
-  add(M.lots.flatMap((l: any) => { const c = M.lotC.get(l.id); return l.items.map((it: any) => { const ci = M.items.get(l.id + "|" + it.k); return { "Kod": l.code, "Firma": firm(l.firmId), "Tedarikçi": M.pname(l.supplierId, l.supplier), "Menşe": l.origin, "Ürün": M.prodName(it), "Model": it.model, "Miktar kg": +it.kg || 0, "Fiyat /kg": it.ppk, "Para birimi": l.cur, "Kur": l.cur === "TL" ? l.kur : "", "Satılan kg": ci?.sold || 0, "Kalan kg": (+it.kg || 0) - (ci?.sold || 0), "Aşama": ST[l.status], "Alım USD": r2(c.costUSD), "Ödenen USD": r2(c.paid), "Kalan borç USD": r2(c.due), "Kâr USD": r2(c.profit), "Ortak": l.ortak?.on ? M.pname(l.ortak.partnerId) : "", "Sipariş": l.orderDate, "Tahmini varış": l.eta, "Varış": l.arriveDate, "Gemi firması": l.carrier || "", "Konteyner": (Array.isArray(l.cntNos) ? l.cntNos : [l.cntNos]).filter(Boolean).join(", "), "B/L": l.bl || "", "Booking": l.booking || "", "Fatura no": l.invoiceNo || "", "Not": l.note }; }); }), "Alımlar");
-  add(M.sales.flatMap((s: any) => s.items.map((ln: any) => { const ci = M.items.get(ln.lotId + "|" + ln.ik); return { "Tarih": s.date, "Firma": firm(s.firmId), "Müşteri": M.pname(s.customerId, s.customer), "Pazar": MK[s.market] || s.market, "Alım": ci?.lot.code, "Ürün": ci ? M.prodName(ci.it) : "", "Model": ci?.it.model || "", "Miktar kg": +ln.kg || 0, "Fiyat /kg": ln.ppk, "Para birimi": s.cur, "Kur": s.cur === "TL" ? s.kur : "", "Tutar USD": r2(usd((+ln.kg || 0) * (+ln.ppk || 0), s.cur, s.kur)), "Fatura no": s.docNo || "", "Plaka": s.plate || "" }; })), "Satışlar");
+  add(M.lots.flatMap((l: any) => { const c = M.lotC.get(l.id); return l.items.map((it: any) => { const ci = M.items.get(l.id + "|" + it.k); return { "Kod": l.code, "Firma": firm(l.firmId), "Tedarikçi": M.pname(l.supplierId, l.supplier), "Menşe": l.origin, "Ürün": M.prodName(it), "Model": it.model, "Miktar kg": +it.kg || 0, "Fiyat /kg": it.ppk, "Para birimi": l.cur, "Kur": l.cur === "TL" ? l.kur : "", "Satılan kg": ci?.sold || 0, "Kalan kg": (+it.kg || 0) - (ci?.sold || 0), "Irak'ta kalan kg": ci ? Math.max(0, l.dest === "irak" ? (+it.kg || 0) - ci.sold : ci.irakIn - ci.soldIrak) : 0, "Aşama": l.status === "depoda" ? (l.dest === "irak" ? "Irak deposu" : "Mersin SB") : ST[l.status], "Varış yeri": l.dest === "irak" ? "Doğrudan Irak deposu" : "Mersin SB", "Alım USD": r2(c.costUSD), "Ödenen USD": r2(c.paid), "Kalan borç USD": r2(c.due), "Kâr USD": r2(c.profit), "Ortak": l.ortak?.on ? M.pname(l.ortak.partnerId) : "", "Sipariş": l.orderDate, "Tahmini varış": l.eta, "Varış": l.arriveDate, "Taşıma": l.transport === "tir" ? "TIR" : "Gemi", "Gemi firması": l.carrier || "", "Nakliye firması": l.trucker || "", "TIR plakası": (l.plates || []).join(", "), "CMR": l.cmr || "", "Konteyner": (Array.isArray(l.cntNos) ? l.cntNos : [l.cntNos]).filter(Boolean).join(", "), "B/L": l.bl || "", "Booking": l.booking || "", "Fatura no": l.invoiceNo || "", "Not": l.note }; }); }), "Alımlar");
+  add(M.sales.flatMap((s: any) => s.items.map((ln: any) => { const ci = M.items.get(ln.lotId + "|" + ln.ik); return { "Tarih": s.date, "Firma": firm(s.firmId), "Müşteri": M.pname(s.customerId, s.customer), "Pazar": MK[s.market] || s.market, "Alım": ci?.lot.code, "Stok yeri": ln.loc === "irak" || ci?.lot.dest === "irak" ? "Irak deposu" : "Mersin SB", "Ürün": ci ? M.prodName(ci.it) : "", "Model": ci?.it.model || "", "Miktar kg": +ln.kg || 0, "Fiyat /kg": ln.ppk, "Para birimi": s.cur, "Kur": s.cur === "TL" ? s.kur : "", "Tutar USD": r2(usd((+ln.kg || 0) * (+ln.ppk || 0), s.cur, s.kur)), "Fatura no": s.docNo || "", "Plaka": s.plate || "" }; })), "Satışlar");
   add(M.pays.map((p: any) => ({ "Tarih": p.date, "Tür": p.dir === "out" ? "Ödeme" : "Tahsilat", "Firma": firm(p.firmId), "Kime/kimden": M.pname(p.partyId, p.party), "Açıklama": p.kind, "Banka": p.bank || "", "Tutar": +p.amount || 0, "Para birimi": p.cur, "Kur": p.cur === "TL" ? p.kur : "", "Tutar USD": r2(usd(p.amount, p.cur, p.kur)), "Not": p.note })), "Ödemeler");
-  add(M.exps.map((x: any) => ({ "Tarih": x.date, "Tür": x.cat, "Firma": firm(x.firmId), "Kime": x.payee, "Tutar": +x.amount || 0, "Para birimi": x.cur, "Kur": x.cur === "TL" ? x.kur : "", "Tutar USD": r2(usd(x.amount, x.cur, x.kur)), "Belge no": x.docNo, "Not": x.note })), "Masraflar");
+  add(M.exps.map((x: any) => ({ "Tarih": x.date, "Tür": x.cat, "Firma": firm(x.firmId), "Kime": x.payee, "Hesap": x.bank || "", "Tutar": +x.amount || 0, "Para birimi": x.cur, "Kur": x.cur === "TL" ? x.kur : "", "Tutar USD": r2(usd(x.amount, x.cur, x.kur)), "Belge no": x.docNo, "Not": x.note })), "Masraflar");
+  add(M.lots.flatMap((l: any) => (l.sevk || []).map((sv: any) => ({ "Tarih": sv.date, "Alım": l.code, "Ürünler": (sv.lines || []).map((z: any) => { const it = l.items.find((i: any) => i.k === z.ik); return `${it ? M.prodName(it) + (it.model ? " " + it.model : "") : "?"} ${fmt0.format(+z.kg || 0)} kg`; }).join(", "), "Nakliye firması": sv.trucker || "", "TIR plakası": (sv.plates || []).join(", "), "Not": sv.note || "" }))), "Irak sevkleri");
+  add(M.trf.map((t: any) => ({ "Tarih": t.date, "Çıkan hesap": String(t.from).replace("|", " · "), "Çıkan tutar": +t.out || 0, "Giren hesap": String(t.to).replace("|", " · "), "Giren tutar": +t.in || 0, "Not": t.note || "" })), "Transferler");
   add(Object.values(M.parties).map((p: any) => ({ "Tür": p.kind === "supplier" ? "Tedarikçi" : "Müşteri / ortak", "Firma": p.name, "İlgili kişi": p.person, "Telefon": p.phone, "E-posta": p.email, "Web": p.web, "Ülke": p.country, "Adres": p.address, "Banka": p.bank })), "Rehber");
   return new Uint8Array(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
 }
