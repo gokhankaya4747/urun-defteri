@@ -8,7 +8,7 @@ const ST = [
   {k:"yuklendi", t:"Yüklendi", s:"Yüklendi"},
   {k:"yolda", t:"Yolda", s:"Yolda"},
   {k:"depoda", t:"Mersin SB'de", s:"Mersin SB"},
-  {k:"kapandi", t:"Kapandı", s:"Kapandı"},
+  {k:"kapandi", t:"Kapandı (mal bitti)", s:"Kapandı"},
 ];
 const STI = Object.fromEntries(ST.map((s,i)=>[s.k,i]));
 const STD = {yuklendi:"loadDate", depoda:"arriveDate"};
@@ -184,6 +184,7 @@ const locLeft = (ci,loc) => loc==="irak" ? irakLeft(ci) : hereLeft(ci);
 const refKey = ref => String(ref||"").split("|").slice(0,2).join("|");
 const refLoc = ref => String(ref||"").split("|")[2]==="irak" ? "irak" : "";
 const lnRef = ln => ln.lotId+"|"+ln.ik+(ln.loc==="irak"?"|irak":"");
+const lotLeft = l => sum(l.items,it=>{ const ci=C.item.get(l.id+"|"+it.k); return ci?Math.max(0,itemStock(ci)):0; });
 const lotIrak = l => l.items.reduce((a,it)=>{ const ci=C.item.get(l.id+"|"+it.k); return a+(ci?Math.max(0,irakLeft(ci)):0); },0);
 const lotHasProd = (l,pid) => l.items.some(it=>matchProd(it,pid));
 const saleHasProd = (s,pid) => s.items.some(ln=>{ const ci=C.item.get(ln.lotId+"|"+ln.ik); return ci && matchProd(ci.it,pid); });
@@ -246,6 +247,8 @@ function vUrunler(){
   if(!ps.length) return h+`<div class="panel"><div class="empty">Ürün listesi yükleniyor…</div></div>`;
   const active=[], idle=[];
   for(const p of ps){ const st=prodStats(p.id); (st.some(r=>r.ord||r.yol||r.dep||r.irak||r.soldY)||S.lots.some(l=>inFirm(l)&&lotHasProd(l,p.id)&&l.status!=="kapandi") ? active : idle).push(p); }
+  const orphan=S.lots.filter(l=>inFirm(l)&&l.status==="kapandi"&&lotLeft(l)>0.5);
+  if(orphan.length) h+=`<div class="fnote" style="margin-bottom:12px">Kapatılmış ama malı satılmamış görünen alımlar (stokta sayılmıyor): ${orphan.map(l=>`<button class="linkbtn" type="button" data-lot="${l.id}">${esc(lotProducts(l))} · ${esc(l.code)} · ${nf0.format(lotLeft(l))} kg</button>`).join(", ")}. Mal duruyorsa alımı açıp <b>“Tekrar aç”</b> de.</div>`;
   if(!active.length) h+=`<div class="panel"><div class="empty">Henüz açık alım yok. Sağ alttaki <b>+</b> ile ilk alımını gir; ürünler burada model model görünür.</div></div>`;
   h+=`<div class="prods">${active.map(p=>{ const rows=prodStats(p.id).filter(r=>r.ord||r.yol||r.dep||r.irak||r.soldY);
     const n=S.lots.filter(l=>inFirm(l)&&lotHasProd(l,p.id)&&l.status!=="kapandi").length;
@@ -537,6 +540,7 @@ function sLot(id){
   const body=`<div class="dhead"><div class="code"><span>${esc(l.code||"")}</span>${stPill(l.status)}${o?`<span class="badge">Ortak alım</span>`:""}${exBadge(l)}</div><div class="ttl">${esc(lotProducts(l))}</div><div class="muted">${esc(lotSupplier(l))}${l.origin?" · "+esc(l.origin):""}</div></div>
     <div class="stepper" role="group" aria-label="Aşama">${step}</div>
     ${canWrite&&next?`<button class="btn pri" type="button" data-setst="${next.k}">${next.t} olarak işaretle →</button>`:""}
+    ${l.status==="kapandi"&&lotLeft(l)>0.5?`<div class="fnote">Bu alım kapalı ama <b>${nf0.format(lotLeft(l))} kg</b> malı satılmamış görünüyor; bu yüzden Ürünler'de ve satış listesinde çıkmıyor. Mal duruyorsa tekrar aç.${canWrite?` <button class="btn sm pri" type="button" data-setst="depoda">Tekrar aç (Mersin SB)</button>`:""}</div>`:""}
     ${track}
     <div class="panel"><div class="tablewrap"><table><thead><tr><th>Ürün / model</th><th class="r">Alınan kg</th><th class="r">Satılan</th>${anyIrak?`<th class="r">Mersin'de</th><th class="r">Irak'ta</th>`:`<th class="r">Kalan</th>`}<th class="r">Fiyat</th></tr></thead><tbody>${itRows}</tbody></table></div></div>
     ${sevkSec(l)}
@@ -1810,9 +1814,10 @@ function sAsk(t){
   const l=lotById(t.id); if(!l) return null;
   const rows=l.items.map(it=>{ const ci=C.item.get(l.id+"|"+it.k); if(!ci) return ""; const h=Math.max(0,hereLeft(ci)), i=Math.max(0,irakLeft(ci)); if(h<=0.5&&i<=0.5) return "";
     return `<li><b>${esc(itemLabel(it))}</b>: ${[h>0.5?`${nf0.format(h)} kg Mersin'de`:"",i>0.5?`${nf0.format(i)} kg Irak deposunda`:""].filter(Boolean).join(", ")}</li>`; }).join("");
-  const body=`<p style="margin:0">Bu alımda hâlâ satılmamış mal görünüyor:</p><ul style="margin:0;padding-left:20px">${rows}</ul>
-    <div class="fnote">Kapatırsan bu mal <b>stoktan çıkar</b> ve satışta seçilemez. Mal gerçekten bittiyse (fire, numune, sayım farkı) kapatabilirsin; hâlâ duruyorsa açık bırak.</div>`;
-  return {title:`${esc(l.code)} kapatılsın mı?`,body,foot:`<button class="btn" type="button" data-act="back">Açık kalsın</button><span class="sp"></span><button class="btn danger" type="button" data-act="ask-close" data-id="${l.id}">Yine de kapat</button>`};
+  const body=`<div class="fnote"><b>“Kapandı” = bu alımın malı tamamen satıldı ya da bitti.</b> Alım işlemin tamamlandıysa ve mal depoda duruyorsa kapatma; alım “Mersin SB” aşamasında kalsın, mal Ürünler'de stok olarak görünür ve satarken seçilir.</div>
+    <p style="margin:0">Bu alımda hâlâ satılmamış mal var:</p><ul style="margin:0;padding-left:20px">${rows}</ul>
+    <p class="muted" style="margin:0;font-size:13px">Sadece mal gerçekten yoksa (fire, numune, sayım farkı) kapat; kapatırsan bu miktar stoktan düşer.</p>`;
+  return {title:`${esc(l.code)} · mal hâlâ stokta`,body,foot:`<button class="btn danger" type="button" data-act="ask-close" data-id="${l.id}">Mal yok, kapat</button><span class="sp"></span><button class="btn pri" type="button" data-act="back">Kapatma, stokta kalsın</button>`};
 }
 /* ---------- banka / kasa (sadece Asya Çerez) ---------- */
 const BANK_FIRM="a", KASA="Kasa (nakit)";
