@@ -7,7 +7,7 @@ const ST = [
   {k:"onodeme", t:"Ön ödeme yapıldı", s:"Ön ödeme"},
   {k:"yuklendi", t:"Yüklendi", s:"Yüklendi"},
   {k:"yolda", t:"Yolda", s:"Yolda"},
-  {k:"depoda", t:"Mersin SB'de", s:"Mersin SB"},
+  {k:"depoda", t:"Depoda", s:"Depoda"},
   {k:"kapandi", t:"Kapandı (mal bitti)", s:"Kapandı"},
 ];
 const STI = Object.fromEntries(ST.map((s,i)=>[s.k,i]));
@@ -102,7 +102,12 @@ const opt = ([v,t],cur) => `<option value="${esc(v)}" ${String(cur??"")===String
 const firmName = id => S.firms[id]?.name || FIRM_DEF[id] || "—";
 const firmColor = id => id==="b" ? "var(--firm-b)" : "var(--firm-a)";
 const firmTag = id => `<span class="firmtag"><span class="dot" style="background:${firmColor(id)}"></span>${esc(firmName(id))}</span>`;
-const stPill = k => { const s=ST[STI[k]]||ST[0]; return `<span class="pill" style="color:var(--st-${s.k})"><span class="dot"></span>${s.s}</span>`; };
+/* "depoda" aşaması alımın gittiği yere göre adlanır: Mersin SB ya da (doğrudan gönderilen mallarda) Irak deposu */
+const isIrakDest = l => l?.dest==="irak";
+const stS = (l,k) => k==="depoda" ? (isIrakDest(l)?"Irak deposu":"Mersin SB") : (ST[STI[k]]||ST[0]).s;
+const stT = (l,k) => k==="depoda" ? (isIrakDest(l)?"Irak deposunda":"Mersin SB'de") : (ST[STI[k]]||ST[0]).t;
+const stPill = (k,l) => { const s=ST[STI[k]]||ST[0]; return `<span class="pill" style="color:var(--st-${s.k})"><span class="dot"></span>${stS(l,s.k)}</span>`; };
+const DEST_SEG = {k:"dest",label:"Mal nereye gidiyor?",type:"seg",options:[["mersin","Mersin SB"],["irak","Doğrudan Irak deposu"]],hint:"Türkiye'den (ör. Ordu) alıp doğrudan Irak'taki depoya yolladığın mallar için “Doğrudan Irak deposu”"};
 const inFirm = x => S.firm==="all" || x.firmId===S.firm;
 const lotById = id => S.lots.find(l=>l.id===id);
 const saleById = id => S.sales.find(s=>s.id===id);
@@ -198,7 +203,7 @@ function prodStats(pid){
     if(!matchProd(ci.it,pid) || !inFirm(ci.lot)) continue;
     const r=g(ci.it.model), st=ci.lot.status, left=Math.max(0,hereLeft(ci)), ir=Math.max(0,irakLeft(ci));
     if(ir>0&&st!=="kapandi"){ r.irak+=ir; r.irakCost+=ir*ci.cu; }
-    if(st==="siparis"||st==="onodeme") r.ord+=left; else if(st==="yuklendi"||st==="yolda") r.yol+=left; else if(st==="depoda"){ r.dep+=left; r.depCost+=left*ci.cu; }
+    if(st==="siparis"||st==="onodeme") r.ord+=left; else if(st==="yuklendi"||st==="yolda") r.yol+=left; else if(st==="depoda"){ if(isIrakDest(ci.lot)){ r.irak+=left; r.irakCost+=left*ci.cu; } else { r.dep+=left; r.depCost+=left*ci.cu; } }
   }
   for(const s of S.sales){ if(!(s.date||"").startsWith(yr) || !inFirm(s)) continue;
     for(const {ln,ci,amtUSD} of SC(s).lines){ if(!ci||!matchProd(ci.it,pid)) continue; const r=g(ci.it.model); r.soldY+=+ln.kg||0; r.revY+=amtUSD; } }
@@ -266,7 +271,7 @@ function lotCard(l){
   if(d!==null) line3=`Varış ${fds(l.eta)} · ${d<0?`<span style="color:var(--bad)">${-d} gün gecikti</span>`:d===0?"bugün":d+" gün"}`;
   else if(l.orderDate && STI[l.status]<=1) line3=`Sipariş ${fds(l.orderDate)}`;
   return `<button type="button" class="card" data-lot="${l.id}">
-    <div class="top1"><span class="mono muted">${esc(l.code||"—")}</span>${l.ortak?.on?`<span class="badge">Ortak</span>`:firmTag(l.firmId)}</div>
+    <div class="top1"><span class="mono muted">${esc(l.code||"—")}</span>${isIrakDest(l)?`<span class="badge">→ Irak deposu</span>`:""}${l.ortak?.on?`<span class="badge">Ortak</span>`:firmTag(l.firmId)}</div>
     <div class="prod">${esc(lotSupplier(l))}</div>
     <div class="lines">${lines}</div>
     ${line3?`<div class="meta">${line3}</div>`:""}
@@ -499,7 +504,7 @@ async function delDoc(btn){
 /* --- alım detayı --- */
 function sLot(id){
   const l=lotById(id); if(!l) return null; const c=LC(l); const si=STI[l.status]??0; const sd=l.statusDates||{};
-  const step=ST.map((s,i)=>`<button type="button" class="step ${i<=si?"done":""} ${i===si?"cur":""}" style="--sc:var(--st-${l.status})" ${canWrite?`data-setst="${s.k}"`:"disabled"} aria-label="${s.t}"><i></i><span>${s.s}</span><small>${sd[s.k]?fds(sd[s.k]):""}</small></button>`).join("");
+  const step=ST.map((s,i)=>`<button type="button" class="step ${i<=si?"done":""} ${i===si?"cur":""}" style="--sc:var(--st-${l.status})" ${canWrite?`data-setst="${s.k}"`:"disabled"} aria-label="${stT(l,s.k)}"><i></i><span>${stS(l,s.k)}</span><small>${sd[s.k]?fds(sd[s.k]):""}</small></button>`).join("");
   const next=ST[si+1];
   const unit=l.priceUnit==="ton"?"ton":"kg";
   const anyIrak=l.items.some(it=>C.item.get(l.id+"|"+it.k)?.irakIn>0);
@@ -537,17 +542,17 @@ function sLot(id){
     : nums.length||l.carrier||l.eta ? `<div class="trackbox"><div class="tb-h"><b>${esc(l.carrier||"Gemi firması girilmedi")}</b>${l.eta?`<span class="muted">Tahmini varış ${fd(l.eta)}${eta!==null?` · ${eta<0?`<span style="color:var(--bad)">${-eta} gün gecikti</span>`:eta===0?"bugün":eta+" gün kaldı"}`:""}</span>`:""}</div>
     ${nums.length?(()=>{ const ti=nums.map(([t,n])=>({t,n,...trackInfo(l.carrier,n,t)})); const nm=ti.find(x=>x.name)?.name; const allDeep=ti.every(x=>x.deep);
       return `<div class="tb-nums">${ti.map(x=>`<a class="trk" href="${esc(x.url)}" target="_blank" rel="noopener" data-trackcopy="${esc(x.n)}" ${x.deep?"":`data-trackpaste="1"`}><span class="muted">${x.t}</span> <span class="mono">${esc(x.n)}</span> ${svg('<path d="M7 17L17 7M9 7h8v8"/>',13)}</a>`).join("")}</div><div class="muted" style="font-size:12px">${!nm?`Gemi firması bilinmiyor; genel takip sitesi açılır ve numara kopyalanır. Düzenle'den gemi firmasını yazarsan doğrudan firmanın sayfası açılır.`:allDeep?`Numaraya dokununca ${esc(nm)} sitesinde sonuç doğrudan açılır.`:`Numaraya dokununca ${esc(nm)} takip sayfası açılır ve numara kopyalanır; sayfadaki kutuya yapıştırıp ara.`}${nm&&!l.carrier?` <span>(Firma numaradan tahmin edildi: ${esc(nm)})</span>`:""}</div>`; })():`<div class="muted" style="font-size:13px">Konteyner, B/L veya booking no girersen buradan tek dokunuşla takip edebilirsin.</div>`}</div>` : "";
-  const body=`<div class="dhead"><div class="code"><span>${esc(l.code||"")}</span>${stPill(l.status)}${o?`<span class="badge">Ortak alım</span>`:""}${exBadge(l)}</div><div class="ttl">${esc(lotProducts(l))}</div><div class="muted">${esc(lotSupplier(l))}${l.origin?" · "+esc(l.origin):""}</div></div>
+  const body=`<div class="dhead"><div class="code"><span>${esc(l.code||"")}</span>${stPill(l.status,l)}${o?`<span class="badge">Ortak alım</span>`:""}${exBadge(l)}</div><div class="ttl">${esc(lotProducts(l))}</div><div class="muted">${esc(lotSupplier(l))}${l.origin?" · "+esc(l.origin):""}</div></div>
     <div class="stepper" role="group" aria-label="Aşama">${step}</div>
-    ${canWrite&&next?`<button class="btn pri" type="button" data-setst="${next.k}">${next.t} olarak işaretle →</button>`:""}
-    ${l.status==="kapandi"&&lotLeft(l)>0.5?`<div class="fnote">Bu alım kapalı ama <b>${nf0.format(lotLeft(l))} kg</b> malı satılmamış görünüyor; bu yüzden Ürünler'de ve satış listesinde çıkmıyor. Mal duruyorsa tekrar aç.${canWrite?` <button class="btn sm pri" type="button" data-setst="depoda">Tekrar aç (Mersin SB)</button>`:""}</div>`:""}
+    ${canWrite&&next?`<button class="btn pri" type="button" data-setst="${next.k}">${stT(l,next.k)} olarak işaretle →</button>`:""}
+    ${l.status==="kapandi"&&lotLeft(l)>0.5?`<div class="fnote">Bu alım kapalı ama <b>${nf0.format(lotLeft(l))} kg</b> malı satılmamış görünüyor; bu yüzden Ürünler'de ve satış listesinde çıkmıyor. Mal duruyorsa tekrar aç.${canWrite?` <button class="btn sm pri" type="button" data-setst="depoda">Tekrar aç (${stS(l,"depoda")})</button>`:""}</div>`:""}
     ${track}
     <div class="panel"><div class="tablewrap"><table><thead><tr><th>Ürün / model</th><th class="r">Alınan kg</th><th class="r">Satılan</th>${anyIrak?`<th class="r">Mersin'de</th><th class="r">Irak'ta</th>`:`<th class="r">Kalan</th>`}<th class="r">Fiyat</th></tr></thead><tbody>${itRows}</tbody></table></div></div>
     ${sevkSec(l)}
     ${money}${ortak}
     ${docsSec("lots",l,"Alış faturası, konşimento, menşe şahadetnamesi gibi belgelerin fotoğrafını çek ya da PDF ekle.")}
     <details class="dmore"><summary>Alım bilgileri</summary>
-    ${kvHTML([["Firma",firmTag(l.firmId)],["Tedarikçi",`<button class="btn sm" type="button" data-party="${esc(pkey(l.supplierId,l.supplier))}" data-pdir="out">${esc(lotSupplier(l))}</button>`],["Menşe",esc(l.origin||"—")],["Teslim",esc(l.incoterm||"—")],["Fatura no",esc(l.invoiceNo||"—")],["Bakiye vadesi",fd(l.payDue)],...(isTir(l)?[["Taşıma","TIR / kara yolu"],["Nakliye firması",esc(l.trucker||"—")],["Plaka",esc((l.plates||[]).join(", ")||"—")],["CMR no",esc(l.cmr||"—")]]:[["Konteyner",l.cnt?`${l.cnt} adet`:"—"],["Gemi firması",esc(l.carrier||l.vessel||"—")]]),["Sipariş",fd(l.orderDate)],["Yükleme",fd(l.loadDate)],["Tahmini varış",fd(l.eta)],["Mersin'e varış",fd(l.arriveDate)],...(l.cur==="TL"?[["Kur",nf4.format(+l.kur||0)]]:[])])}
+    ${kvHTML([["Firma",firmTag(l.firmId)],["Tedarikçi",`<button class="btn sm" type="button" data-party="${esc(pkey(l.supplierId,l.supplier))}" data-pdir="out">${esc(lotSupplier(l))}</button>`],["Menşe",esc(l.origin||"—")],["Teslim",esc(l.incoterm||"—")],["Fatura no",esc(l.invoiceNo||"—")],["Bakiye vadesi",fd(l.payDue)],...(isTir(l)?[["Taşıma","TIR / kara yolu"],["Nakliye firması",esc(l.trucker||"—")],["Plaka",esc((l.plates||[]).join(", ")||"—")],["CMR no",esc(l.cmr||"—")]]:[["Konteyner",l.cnt?`${l.cnt} adet`:"—"],["Gemi firması",esc(l.carrier||l.vessel||"—")]]),["Sipariş",fd(l.orderDate)],["Yükleme",fd(l.loadDate)],["Tahmini varış",fd(l.eta)],[isIrakDest(l)?"Irak deposuna varış":"Mersin'e varış",fd(l.arriveDate)],...(l.cur==="TL"?[["Kur",nf4.format(+l.kur||0)]]:[])])}
     ${l.note?`<div class="note">${esc(l.note)}</div>`:""}
     </details>
     <div class="dsec"><div class="h"><h4>Tedarikçiye ödemeler</h4>${canWrite?`<button class="btn sm" type="button" data-act="pay-lot" data-id="${l.id}">+ Ödeme</button>`:""}</div><div class="panel rows">${c.pays.length?c.pays.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(payRow).join(""):`<div class="empty">Ödeme girilmedi.</div>`}</div></div>
@@ -632,7 +637,7 @@ function sProd(pid){
   const p=prodList().find(x=>x.id===pid); if(!p) return null;
   const lots=S.lots.filter(l=>inFirm(l)&&lotHasProd(l,pid)).sort((a,b)=>(b.orderDate||"").localeCompare(a.orderDate||""));
   const sales=S.sales.filter(s=>inFirm(s)&&saleHasProd(s,pid)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-  const lotRow=l=>`<button type="button" class="row" data-lot="${l.id}"><span class="main"><div class="t">${esc(l.code)} · ${esc(lotSupplier(l))}</div><div class="sub">${l.items.filter(it=>matchProd(it,pid)).map(it=>{const ci=C.item.get(l.id+"|"+it.k); return `${it.model||"model yok"} ${nf0.format(+it.kg||0)} kg${ci?.soldKg?` (kalan ${nf0.format(Math.max(0,itemStock(ci)))})`:""}`;}).join(" · ")}</div></span><span class="end"><div class="a">${stPill(l.status)}</div><div class="b">${fd(l.orderDate)}</div></span></button>`;
+  const lotRow=l=>`<button type="button" class="row" data-lot="${l.id}"><span class="main"><div class="t">${esc(l.code)} · ${esc(lotSupplier(l))}</div><div class="sub">${l.items.filter(it=>matchProd(it,pid)).map(it=>{const ci=C.item.get(l.id+"|"+it.k); return `${it.model||"model yok"} ${nf0.format(+it.kg||0)} kg${ci?.soldKg?` (kalan ${nf0.format(Math.max(0,itemStock(ci)))})`:""}`;}).join(" · ")}</div></span><span class="end"><div class="a">${stPill(l.status,l)}</div><div class="b">${fd(l.orderDate)}</div></span></button>`;
   const body=`<div class="panel">${modelTable(prodStats(pid))}</div>
     <div class="dsec"><div class="h"><h4>Alımlar</h4></div><div class="panel rows">${lots.length?lots.map(lotRow).join(""):`<div class="empty">Bu ürünün alımı yok.</div>`}</div></div>
     <div class="dsec"><div class="h"><h4>Satışlar</h4></div><div class="panel rows">${sales.length?sales.slice(0,40).map(saleRow).join(""):`<div class="empty">Bu ürünün satışı yok.</div>`}</div></div>
@@ -810,7 +815,7 @@ function quickContext(){
   const sales=S.sales.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).filter((x,i)=>i<40||SC(x).due>1).slice(0,70)
     .map(x=>{ const c=SC(x); return `s:${x.id} · satış ${fd(x.date)} · ${saleCustomer(x)} · ${MK[x.market]||""} · ${saleLinesTxt(x)}${c.olot?" · ortak alım malı":c.due>1?" · kalan alacak "+usdf(c.due):" · tahsil edildi"}`; });
   const lots=S.lots.slice().sort((a,b)=>String(b.code).localeCompare(String(a.code))).filter((l,i)=>i<40||l.status!=="kapandi"||LC(l).due>1).slice(0,70)
-    .map(l=>{ const c=LC(l); return `l:${l.id} · alım ${l.code} · ${lotProducts(l)} · ${lotSupplier(l)} · ${ST[STI[l.status]]?.t||l.status}${c.due>1?" · tedarikçiye kalan borç "+usdf(c.due):""}${l.ortak?.on?` · ORTAK ALIM (ortak: ${partyName(l.ortak.partnerId)}${c.odue>1?", ortaktan alacak "+usdf(c.odue):""})`:` · ${firmName(l.firmId)}`}`; });
+    .map(l=>{ const c=LC(l); return `l:${l.id} · alım ${l.code} · ${lotProducts(l)} · ${lotSupplier(l)} · ${stT(l,l.status)}${c.due>1?" · tedarikçiye kalan borç "+usdf(c.due):""}${l.ortak?.on?` · ORTAK ALIM (ortak: ${partyName(l.ortak.partnerId)}${c.odue>1?", ortaktan alacak "+usdf(c.odue):""})`:` · ${firmName(l.firmId)}`}`; });
   return {firms:[firmName("a"),firmName("b")],products:productsSorted().map(p=>p.name),models:Object.fromEntries(productsSorted().map(p=>[p.name,modelsOf(p.id)])),
     expcats:lists("expcats"),banks:lists("banks"),customers:partiesOf("customer").map(p=>p.name),suppliers:partiesOf("supplier").map(p=>p.name),sales,lots};
 }
@@ -909,7 +914,7 @@ function stockOptions(v,curSale){
     if(!(left>0.0001) && !chosen.has(ref)) continue;
     if(ci.lot.status==="kapandi" && !chosen.has(ref)) continue;
     const g=itemProd(ci.it); if(!groups.has(g)) groups.set(g,[]);
-    const where = loc ? "IRAK DEPOSU" : STI[ci.lot.status]<4 ? ST[STI[ci.lot.status]].s : (ci.irakIn ? "Mersin SB" : "");
+    const where = loc ? "IRAK DEPOSU" : STI[ci.lot.status]<4 ? ST[STI[ci.lot.status]].s : isIrakDest(ci.lot) ? "IRAK DEPOSU" : (ci.irakIn ? "Mersin SB" : "");
     groups.get(g).push([ref,`${ci.it.model||"model yok"} · ${ci.lot.code} · ${nf0.format(Math.max(0,left))} kg kaldı · ${ci.lot.ortak?.on?"ORTAK":firmName(ci.lot.firmId)}${where?" · "+where:""}`]);
   }
   return [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],"tr"));
@@ -1021,8 +1026,8 @@ const listSel = (k,lk,label,extra={}) => ({k,label,type:"select",quick:lk,quickL
 function lotForm(l){
   const isNew=!l;
   const v=l?{...l,items:l.items.map(it=>({...it})),ortakOn:l.ortak?.on?"1":"0",partnerId:l.ortak?.partnerId||"",share:l.ortak?.share??50,supplierId:l.supplierId||""}
-           :{firmId:defFirm(),status:"siparis",transport:"gemi",incoterm:"CIF Mersin",orderDate:today(),cur:"USD",priceUnit:"kg",items:[{}],ortakOn:"0",share:50,cntNos:[""]};
-  if(l) v.cntNos=cntList(l).length?cntList(l):[""];
+           :{firmId:defFirm(),status:"siparis",transport:"gemi",dest:"mersin",incoterm:"CIF Mersin",orderDate:today(),cur:"USD",priceUnit:"kg",items:[{}],ortakOn:"0",share:50,cntNos:[""]};
+  if(l){ v.cntNos=cntList(l).length?cntList(l):[""]; v.dest=l.dest||"mersin"; }
   const shipKeys=["carrier","bl","booking","eta","loadDate","arriveDate","vessel","note","invoiceNo","payDue","trucker","cmr"];
   openForm({title:isNew?"Yeni alım":"Alımı düzenle", values:v, docTarget:l?{col:"lots",id:l.id}:null, aiKind:"lot", fields:[
     {k:"files",type:"files",label:"Alış faturası / proforma"},
@@ -1037,6 +1042,7 @@ function lotForm(l){
     {k:"share",label:"Bizim kâr payımız (%)",type:"num",half:true,showIf:x=>x.ortakOn==="1",req:true},
     {k:"onote",type:"note",showIf:x=>x.ortakOn==="1",text:"Mal bizim firmamız üzerine alınır, alış ve masrafları biz öderiz. Ortak malı orada satar; sen ortağın satışlarını bu alıma girersin. Sistem ortağın sana göndermesi gerekeni hesaplar: <b>sermaye + bizim masraflar + kâr payımız</b>. Gelen havaleleri bu alımın sayfasından girersin."},
     {details:"Sevkiyat, tarihler ve not (sonra da girebilirsin)",open:x=>shipKeys.some(k=>x[k])||(x.cntNos||[]).some(Boolean)},
+    DEST_SEG,
     TRANSPORT_SEG,
     {k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)]),ph:"COSCO, MSC…",showIf:x=>!isTir(x)},
     {k:"cnt",label:"Konteyner sayısı",type:"num",half:true,showIf:x=>!isTir(x)},
@@ -1047,7 +1053,7 @@ function lotForm(l){
     {k:"orderDate",label:"Sipariş tarihi",type:"date",half:true},
     {k:"eta",label:"Tahmini varış",type:"date",half:true},
     {k:"loadDate",label:"Yükleme tarihi",type:"date",half:true},
-    {k:"arriveDate",label:"Mersin'e varış",type:"date",half:true},
+    {k:"arriveDate",label:"Depoya varış",type:"date",half:true},
     {k:"incoterm",label:"Teslim şekli",half:true,list:["CIF Mersin","CFR Mersin","FOB","EXW"]},
     {k:"invoiceNo",label:"Fatura no",half:true},
     {k:"payDue",label:"Tedarikçi bakiye vadesi",type:"date",half:true,hint:"Vadesi gelince ve geçince bildirim gelir"},
@@ -1073,7 +1079,7 @@ function lotForm(l){
     if(x.cur==="TL") rememberKur(x.kur);
     const doc={...(l||{})}; delete doc.id; for(const k of ["product","kg","price","ppk","supplier","model"]) delete doc[k];
     Object.assign(doc,{firmId:x.firmId,supplierId:x.supplierId,origin:x.origin||"",items,priceUnit:x.priceUnit||"kg",cur:x.cur,kur:x.cur==="TL"?x.kur:null,incoterm:x.incoterm||"",ortak,
-      status:l?l.status:"siparis",cntNos:(x.cntNos||[]).filter(Boolean),bl:(x.bl||"").toUpperCase(),booking:(x.booking||"").toUpperCase(),carrier:x.carrier||"",vessel:x.vessel||l?.vessel||"",transport:x.transport==="tir"?"tir":"gemi",trucker:(x.trucker||"").trim(),cmr:(x.cmr||"").trim().toUpperCase(),plates:(x.plates||[]).map(p=>p.trim().toUpperCase()).filter(Boolean),orderDate:x.orderDate||"",loadDate:x.loadDate||"",eta:x.eta||"",arriveDate:x.arriveDate||"",invoiceNo:(x.invoiceNo||"").trim(),payDue:x.payDue||"",note:x.note||""});
+      status:l?l.status:"siparis",cntNos:(x.cntNos||[]).filter(Boolean),bl:(x.bl||"").toUpperCase(),booking:(x.booking||"").toUpperCase(),carrier:x.carrier||"",vessel:x.vessel||l?.vessel||"",transport:x.transport==="tir"?"tir":"gemi",dest:x.dest==="irak"?"irak":"mersin",trucker:(x.trucker||"").trim(),cmr:(x.cmr||"").trim().toUpperCase(),plates:(x.plates||[]).map(p=>p.trim().toUpperCase()).filter(Boolean),orderDate:x.orderDate||"",loadDate:x.loadDate||"",eta:x.eta||"",arriveDate:x.arriveDate||"",invoiceNo:(x.invoiceNo||"").trim(),payDue:x.payDue||"",note:x.note||""});
     doc.cnt=Math.max(doc.cntNos.length,+x.cnt||0);
     const sd={...(doc.statusDates||{})};
     if(isNew){ doc.code=nextCode(x.orderDate); sd.siparis=x.orderDate||today(); doc.log=addLog({},"Alım oluşturuldu"); }
@@ -1098,12 +1104,12 @@ function stepTo(id,k,ok){
   if(STI[k]<STI[l.status]) return setStatus(id,k);
   if(k==="onodeme") return payForm(null,{dir:"out",lotId:id,kind:"Ön ödeme",title:"Ön ödeme ne kadar?"});
   const F={
-    yuklendi:{title:"Yüklendi",fields:[TRANSPORT_SEG,{k:"loadDate",label:"Yükleme tarihi",type:"date",half:true,def:today()},{k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)]),showIf:x=>!isTir(x)},{k:"cnt",label:"Konteyner sayısı",type:"num",half:true,showIf:x=>!isTir(x)},{k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",ph:"MSCU1234567",showIf:x=>!isTir(x)},{k:"bl",label:"Konşimento (B/L) no",half:true,showIf:x=>!isTir(x)},{k:"booking",label:"Booking no",half:true,showIf:x=>!isTir(x)},...tirFields(),{k:"eta",label:"Tahmini varış",type:"date",half:true},{k:"files",type:"files",label:"Konşimento / CMR / packing list",hint:"İsteğe bağlı."}],docKind:l.transport==="tir"?"CMR / taşıma belgesi":"Konşimento (B/L)"},
-    yolda:{title:"Yolda",fields:[{k:"eta",label:"Tahmini Mersin varışı",type:"date"},l.transport==="tir"?{k:"trucker",label:"Nakliye firması",list:()=>uniq(S.lots.map(z=>z.trucker))}:{k:"carrier",label:"Gemi firması",list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)])}]},
-    depoda:{title:"Mersin Serbest Bölge'ye geldi",fields:[{k:"arriveDate",label:"Varış tarihi",type:"date",def:today()}]},
+    yuklendi:{title:"Yüklendi",fields:[DEST_SEG,TRANSPORT_SEG,{k:"loadDate",label:"Yükleme tarihi",type:"date",half:true,def:today()},{k:"carrier",label:"Gemi firması",half:true,list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)]),showIf:x=>!isTir(x)},{k:"cnt",label:"Konteyner sayısı",type:"num",half:true,showIf:x=>!isTir(x)},{k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",ph:"MSCU1234567",showIf:x=>!isTir(x)},{k:"bl",label:"Konşimento (B/L) no",half:true,showIf:x=>!isTir(x)},{k:"booking",label:"Booking no",half:true,showIf:x=>!isTir(x)},...tirFields(),{k:"eta",label:"Tahmini varış",type:"date",half:true},{k:"files",type:"files",label:"Konşimento / CMR / packing list",hint:"İsteğe bağlı."}],docKind:l.transport==="tir"?"CMR / taşıma belgesi":"Konşimento (B/L)"},
+    yolda:{title:"Yolda",fields:[{k:"eta",label:isIrakDest(l)?"Tahmini Irak deposu varışı":"Tahmini Mersin varışı",type:"date"},l.transport==="tir"?{k:"trucker",label:"Nakliye firması",list:()=>uniq(S.lots.map(z=>z.trucker))}:{k:"carrier",label:"Gemi firması",list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)])}]},
+    depoda:{title:isIrakDest(l)?"Irak deposuna geldi":"Mersin Serbest Bölge'ye geldi",fields:[{k:"arriveDate",label:"Varış tarihi",type:"date",def:today()}]},
   }[k];
   if(!F) return setStatus(id,k);
-  const v={transport:l.transport||"gemi",trucker:l.trucker||"",cmr:l.cmr||"",plates:(l.plates||[]).length?l.plates:[""],loadDate:l.loadDate||(k==="yuklendi"?today():""),carrier:l.carrier||"",cnt:l.cnt||"",cntNos:cntList(l).length?cntList(l):[""],bl:l.bl||"",booking:l.booking||"",eta:l.eta||"",arriveDate:l.arriveDate||(k==="depoda"?today():"")};
+  const v={dest:l.dest||"mersin",transport:l.transport||"gemi",trucker:l.trucker||"",cmr:l.cmr||"",plates:(l.plates||[]).length?l.plates:[""],loadDate:l.loadDate||(k==="yuklendi"?today():""),carrier:l.carrier||"",cnt:l.cnt||"",cntNos:cntList(l).length?cntList(l):[""],bl:l.bl||"",booking:l.booking||"",eta:l.eta||"",arriveDate:l.arriveDate||(k==="depoda"?today():"")};
   openForm({title:`${l.code} · ${F.title}`,values:v,fields:F.fields,docTarget:{col:"lots",id},docKind:F.docKind,
     onChange:(x,f)=>syncCntRows(f,x.cnt),
     onSave: async x=>{
@@ -1326,9 +1332,9 @@ function firmsForm(){
 
 async function setStatus(id,k){
   const l=lotById(id); if(!l||l.status===k) return;
-  const upd={status:k, statusDates:{...(l.statusDates||{}),[k]:today()}, log:addLog(l,`Aşama: ${ST[STI[l.status]].t} → ${ST[STI[k]].t}`), updatedAt:new Date().toISOString(), updatedBy:me||null};
+  const upd={status:k, statusDates:{...(l.statusDates||{}),[k]:today()}, log:addLog(l,`Aşama: ${stT(l,l.status)} → ${stT(l,k)}`), updatedAt:new Date().toISOString(), updatedBy:me||null};
   const f=STD[k]; if(f && !l[f]) upd[f]=today();
-  try{ await db.doc("lots/"+id).update(upd); toast(ST[STI[k]].t); }catch(e){ toast(dbErr(e)); }
+  try{ await db.doc("lots/"+id).update(upd); toast(stT(l,k)); }catch(e){ toast(dbErr(e)); }
 }
 
 /* ---------- silme ---------- */
@@ -1814,7 +1820,7 @@ function sAsk(t){
   const l=lotById(t.id); if(!l) return null;
   const rows=l.items.map(it=>{ const ci=C.item.get(l.id+"|"+it.k); if(!ci) return ""; const h=Math.max(0,hereLeft(ci)), i=Math.max(0,irakLeft(ci)); if(h<=0.5&&i<=0.5) return "";
     return `<li><b>${esc(itemLabel(it))}</b>: ${[h>0.5?`${nf0.format(h)} kg Mersin'de`:"",i>0.5?`${nf0.format(i)} kg Irak deposunda`:""].filter(Boolean).join(", ")}</li>`; }).join("");
-  const body=`<div class="fnote"><b>“Kapandı” = bu alımın malı tamamen satıldı ya da bitti.</b> Alım işlemin tamamlandıysa ve mal depoda duruyorsa kapatma; alım “Mersin SB” aşamasında kalsın, mal Ürünler'de stok olarak görünür ve satarken seçilir.</div>
+  const body=`<div class="fnote"><b>“Kapandı” = bu alımın malı tamamen satıldı ya da bitti.</b> Alım işlemin tamamlandıysa ve mal depoda duruyorsa kapatma; alım “${stS(l,"depoda")}” aşamasında kalsın, mal Ürünler'de stok olarak görünür ve satarken seçilir.</div>
     <p style="margin:0">Bu alımda hâlâ satılmamış mal var:</p><ul style="margin:0;padding-left:20px">${rows}</ul>
     <p class="muted" style="margin:0;font-size:13px">Sadece mal gerçekten yoksa (fire, numune, sayım farkı) kapat; kapatırsan bu miktar stoktan düşer.</p>`;
   return {title:`${esc(l.code)} · mal hâlâ stokta`,body,foot:`<button class="btn danger" type="button" data-act="ask-close" data-id="${l.id}">Mal yok, kapat</button><span class="sp"></span><button class="btn pri" type="button" data-act="back">Kapatma, stokta kalsın</button>`};
@@ -1911,6 +1917,7 @@ async function accDel(btn,kind){
 }
 /* --- Irak deposuna sevk: Mersin SB'deki malın satılmadan Irak'a gönderilen kısmı --- */
 function sevkSec(l){
+  if(isIrakDest(l)) return "";
   const svs=l.sevk||[]; const canSend=canWrite&&db&&l.status==="depoda"&&l.items.some(it=>{ const ci=C.item.get(l.id+"|"+it.k); return ci&&hereLeft(ci)>0.5; });
   if(!svs.length&&!canSend) return "";
   const lab=ik=>{ const it=l.items.find(x=>x.k===ik); return it?itemLabel(it):"?"; };

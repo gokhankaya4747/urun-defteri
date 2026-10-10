@@ -118,7 +118,7 @@ const MON = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "E
 const fd = (d?: string) => { if (!d) return "—"; const [y, m, dd] = d.slice(0, 10).split("-"); return `${+dd} ${MON[+m - 1]} ${y}`; };
 const todayTR = () => iso(new Date(Date.now() + 3 * 3600e3));
 const daysTo = (d: string) => Math.round((Date.parse(d + "T12:00:00Z") - Date.parse(todayTR() + "T12:00:00Z")) / 864e5);
-const ST: Record<string, string> = { siparis: "Sipariş", onodeme: "Ön ödeme", yuklendi: "Yüklendi", yolda: "Yolda", depoda: "Mersin SB", kapandi: "Kapandı" };
+const ST: Record<string, string> = { siparis: "Sipariş", onodeme: "Ön ödeme", yuklendi: "Yüklendi", yolda: "Yolda", depoda: "Depoda", kapandi: "Kapandı" };
 const MK: Record<string, string> = { irak: "Irak", ic: "İç piyasa", diger: "İhracat" };
 
 function model(rows: { col: string; id: string; data: any }[]) {
@@ -224,7 +224,7 @@ function digestHtml(M: ReturnType<typeof model>) {
   const stock = new Map<string, Map<string, { kg: number; cost: number }>>();
   for (const ci of M.items.values()) {
     if (ci.lot.status !== "depoda") continue; const left = (+ci.it.kg || 0) - ci.sold; if (left <= 0) continue;
-    const irak = Math.max(0, ci.irakIn - ci.soldIrak), here = left - irak;
+    const irak = ci.lot.dest === "irak" ? left : Math.max(0, ci.irakIn - ci.soldIrak), here = left - irak;
     const p = M.prodName(ci.it); if (!stock.has(p)) stock.set(p, new Map());
     const m = stock.get(p)!;
     for (const [k, kg] of [[ci.it.model || "—", here], [`${ci.it.model || "—"} · Irak deposu`, irak]] as [string, number][]) { if (kg <= 0) continue; const r = m.get(k) || { kg: 0, cost: 0 }; r.kg += kg; r.cost += kg * ci.cu; m.set(k, r); }
@@ -564,7 +564,8 @@ async function doBildirim() {
     if ((l.status === "yuklendi" || l.status === "yolda") && l.eta) {
       const d = daysTo(l.eta);
       const tir = l.transport === "tir", w = tir ? "TIR" : "Konteyner", via = tir ? [l.trucker, ...(l.plates || [])].filter(Boolean).join(" · ") : l.carrier;
-      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: d === 0 ? `${w} bugün Mersin'de` : `${w} ${d === 1 ? "yarın" : "3 gün sonra"} Mersin'de`, body: `${lotLabel(l)}${via ? " · " + via : ""}`, url: `./#lot=${l.id}` });
+      const yer = l.dest === "irak" ? "Irak deposunda" : "Mersin'de";
+      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: d === 0 ? `${w} bugün ${yer}` : `${w} ${d === 1 ? "yarın" : "3 gün sonra"} ${yer}`, body: `${lotLabel(l)}${via ? " · " + via : ""}`, url: `./#lot=${l.id}` });
       else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `Varış ${-d} gün gecikti`, body: `${lotLabel(l)} · ${tir ? "nakliyeciden" : "gemi firmasından"} kontrol et`, url: `./#lot=${l.id}` });
     }
     const c = M.lotC.get(l.id);
