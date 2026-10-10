@@ -1,6 +1,16 @@
-/* Ürün Defteri — bildirim alıcısı (önbellek yok, sadece push) */
+/* Ürün Defteri — bildirim alıcısı + güncellemeleri hemen almak için ağ öncelikli sayfa yükleme (önbellek tutmaz) */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("fetch", (e) => {
+  const r = e.request, u = new URL(r.url);
+  if (r.method !== "GET" || u.origin !== self.location.origin) return;
+  // sayfa ve uygulama dosyaları: önce sunucuya sor (değişmediyse 304, hızlı); internet yoksa tarayıcının elindeki kopya
+  if (r.mode === "navigate" || /\.(js|css|webmanifest)$/.test(u.pathname)) {
+    // navigate isteği init ile kopyalanamaz; adresi yeniden iste
+    const fresh = r.mode === "navigate" ? fetch(u.href, { cache: "no-cache", credentials: "same-origin" }) : fetch(r, { cache: "no-cache" });
+    e.respondWith(fresh.catch(() => fetch(r)));
+  }
+});
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data.json(); } catch (_) { d = { title: "Ürün Defteri", body: e.data ? e.data.text() : "" }; }

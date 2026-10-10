@@ -2055,7 +2055,7 @@ const pushSupported = () => "serviceWorker" in navigator && "PushManager" in win
 const isStandalone = () => window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone===true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
 let swRegP=null;
-const swReady = () => swRegP || (swRegP = ("serviceWorker" in navigator) ? navigator.serviceWorker.register("sw.js").then(r=>navigator.serviceWorker.ready.then(()=>r)).catch(e=>{ swRegP=null; throw e; }) : Promise.resolve(null));
+const swReady = () => swRegP || (swRegP = ("serviceWorker" in navigator) ? navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(r=>navigator.serviceWorker.ready.then(()=>r)).catch(e=>{ swRegP=null; throw e; }) : Promise.resolve(null));
 const u8 = s => { const t=s.replace(/-/g,"+").replace(/_/g,"/"); const b=atob(t+"===".slice((t.length+3)%4)); return Uint8Array.from(b,c=>c.charCodeAt(0)); };
 const deviceName = () => { const ua=navigator.userAgent; return /iphone/i.test(ua)?"iPhone":/ipad/i.test(ua)?"iPad":/android/i.test(ua)?"Android telefon":/mac/i.test(ua)?"Mac":/windows/i.test(ua)?"Windows bilgisayar":"Cihaz"; };
 async function pushState(){

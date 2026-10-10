@@ -1,6 +1,9 @@
 """index.html üretir: python3 build.py"""
-import re
+import re, hashlib
 src=lambda f: open('src/'+f,encoding='utf-8').read()
+# dosya içeriğinden sürüm: güncelleme gelince tarayıcı eski kopyayı kullanmasın
+ver=lambda t: hashlib.sha1(t.encode('utf-8')).hexdigest()[:10]
+V_APP=ver(src('app.js')); V_RT=ver(src('runtime.js')); V_CFG=ver(open('config.js',encoding='utf-8').read())
 old=src('header_source.html')
 hs=old.index('<header class="top">'); he=old.index('<script>')
 header=old[hs:he].replace('<b>Parti Defteri</b>','<b>Ürün Defteri</b>').replace('<div id="sheetroot"></div>','<button class="fab" id="fab" type="button" aria-label="Yeni kayıt ekle"><svg width="26" height="26" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>\n<div id="sheetroot"></div>')
@@ -29,9 +32,9 @@ html,body{{margin:0}} img{{max-width:100%}} [hidden]{{display:none!important}}
 </head><body>
 <div class="authwrap" id="auth"><div class="authcard"><div class="mark">{logo}<b>Ürün Defteri</b></div><div id="authbox"><p class="muted">Yükleniyor…</p></div></div></div>
 {header}<script src="supabase.js"></script>
-<script src="config.js"></script>
-<script src="runtime.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v={V_CFG}"></script>
+<script src="runtime.js?v={V_RT}"></script>
+<script src="app.js?v={V_APP}"></script>
 </body></html>
 '''
 open('index.html','w',encoding='utf-8').write(html)
