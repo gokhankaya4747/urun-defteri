@@ -241,10 +241,22 @@ function render(){
 const prodChips = () => `<div class="chips" role="group" aria-label="Ürün"><button type="button" class="chip" data-prod="all" aria-pressed="${S.prod==="all"}">Tüm ürünler</button>${prodList().map(p=>`<button type="button" class="chip" data-prod="${esc(p.id)}" aria-pressed="${S.prod===p.id}">${esc(p.name)}</button>`).join("")}</div>`;
 
 /* --- Ürünler --- */
+/* ürün → model: ayrıntı sayfasındaki tablo; hiç değeri olmayan sütunlar gösterilmez */
 function modelTable(rows){
   if(!rows.length) return `<div class="empty">Henüz model yok. Ayarlar → Ürünler ve modeller'den ekleyebilir ya da alım girerken yazabilirsin.</div>`;
-  const c=v=>v?nf0.format(Math.round(v)):`<span class="muted">—</span>`;
-  return `<div class="tablewrap"><table><thead><tr><th>Model</th><th class="r">Sipariş</th><th class="r">Yolda</th><th class="r">Mersin SB</th>${rows.some(r=>r.irak)?`<th class="r">Irak deposu</th>`:""}<th class="r">${today().slice(0,4)} satış</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.model)}</b></td><td class="r">${c(r.ord)}</td><td class="r">${c(r.yol)}</td><td class="r">${r.dep?`${nf0.format(Math.round(r.dep))}<br><span class="muted" style="font-size:12px">$${nf2.format(r.depCost/r.dep)}/kg</span>`:`<span class="muted">—</span>`}</td>${rows.some(x=>x.irak)?`<td class="r">${r.irak?`${nf0.format(Math.round(r.irak))}<br><span class="muted" style="font-size:12px">$${nf2.format(r.irakCost/r.irak)}/kg</span>`:`<span class="muted">—</span>`}</td>`:""}<td class="r">${r.soldY?`${nf0.format(r.soldY)}<br><span class="muted" style="font-size:12px">ort. $${nf2.format(r.revY/r.soldY)}/kg</span>`:`<span class="muted">—</span>`}</td></tr>`).join("")}</tbody></table></div><div class="muted" style="font-size:12px;padding:6px 14px 10px">Miktarlar kg. Satılan kısım düşülmüş, kalan mal gösterilir.</div>`;
+  const kg=(v,cost)=>v?`${nf0.format(Math.round(v))}${cost!==undefined?`<br><span class="muted" style="font-size:12px">$${nf2.format(cost/v)}/kg</span>`:""}`:`<span class="muted">—</span>`;
+  const cols=[["ord","Sipariş",r=>kg(r.ord)],["yol","Yolda",r=>kg(r.yol)],["dep","Mersin SB",r=>kg(r.dep,r.depCost)],["irak","Irak deposu",r=>kg(r.irak,r.irakCost)],
+    ["soldY",`${today().slice(0,4)} satış`,r=>r.soldY?`${nf0.format(r.soldY)}<br><span class="muted" style="font-size:12px">ort. $${nf2.format(r.revY/r.soldY)}/kg</span>`:`<span class="muted">—</span>`]].filter(([k])=>rows.some(r=>r[k]));
+  return `<div class="tablewrap"><table><thead><tr><th>Model</th>${cols.map(([,t])=>`<th class="r">${t}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.model)}</b></td>${cols.map(([,,f])=>`<td class="r">${f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="muted" style="font-size:12px;padding:6px 14px 10px">Miktarlar kg. Satılan kısım düşülmüş, kalan mal gösterilir.</div>`;
+}
+/* Ürünler sekmesi: her model tek satır, sadece malı olan durumlar etiket olarak */
+function modelChips(rows){
+  const chip=(cls,t,v)=>`<span class="stk" style="--c:var(--st-${cls})"><i></i>${t} <b>${nf0.format(Math.round(v))}</b> kg</span>`;
+  return `<div class="mrows">${rows.map(r=>{
+    const chips=[r.dep?chip("depoda","Mersin SB",r.dep):"",r.irak?chip("irak","Irak",r.irak):"",r.yol?chip("yolda","Yolda",r.yol):"",r.ord?chip("siparis","Siparişte",r.ord):""].filter(Boolean);
+    const stockKg=r.dep+r.irak, cost=r.depCost+r.irakCost;
+    const sub=[stockKg?`maliyet $${nf2.format(cost/stockKg)}/kg`:"",r.soldY?`bu yıl ${nf0.format(r.soldY)} kg satıldı (ort. $${nf2.format(r.revY/r.soldY)})`:""].filter(Boolean).join(" · ");
+    return `<div class="mrow2"><div class="mn">${esc(r.model)}</div><div class="mc">${chips.length?chips.join(""):`<span class="muted" style="font-size:13px">stok yok</span>`}</div>${sub?`<div class="ms muted">${sub}</div>`:""}</div>`; }).join("")}</div>`;
 }
 function vUrunler(){
   let h=`<div class="vh"><h2>Ürünler</h2>${canWrite&&db?`<button class="btn" type="button" data-act="set-products">Ürün / model düzenle</button>`:""}</div>`;
@@ -257,7 +269,7 @@ function vUrunler(){
   if(!active.length) h+=`<div class="panel"><div class="empty">Henüz açık alım yok. Sağ alttaki <b>+</b> ile ilk alımını gir; ürünler burada model model görünür.</div></div>`;
   h+=`<div class="prods">${active.map(p=>{ const rows=prodStats(p.id).filter(r=>r.ord||r.yol||r.dep||r.irak||r.soldY);
     const n=S.lots.filter(l=>inFirm(l)&&lotHasProd(l,p.id)&&l.status!=="kapandi").length;
-    return `<section><div class="prod-h"><h3>${esc(p.name)}</h3><span class="muted">${n?n+" açık alım":"açık alım yok"}</span><button class="btn sm" type="button" data-prodsheet="${esc(p.id)}">Ayrıntı</button></div><div class="panel">${modelTable(rows)}</div></section>`; }).join("")}</div>`;
+    return `<section class="pcard" data-prodsheet="${esc(p.id)}" role="button" tabindex="0" aria-label="${esc(p.name)} ayrıntısı"><div class="prod-h"><h3>${esc(p.name)}</h3><span class="muted">${n?n+" açık alım":"açık alım yok"}</span><span class="chev" aria-hidden="true">›</span></div>${modelChips(rows)}</section>`; }).join("")}</div>`;
   if(idle.length) h+=`<p class="muted" style="margin:0;font-size:14px">Stokta ya da yolda malı olmayan ürünler: ${idle.map(p=>`<button class="linkbtn" type="button" data-prodsheet="${esc(p.id)}">${esc(p.name)}</button>`).join(" · ")}</p>`;
   return h;
 }
@@ -2216,6 +2228,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape" && S.stack.length) return closeSheet();
   if(e.key==="Enter" && e.target.matches("tr.click")) e.target.click();
+  if((e.key==="Enter"||e.key===" ") && e.target.matches(".pcard")){ e.preventDefault(); e.target.click(); }
 });
 function fmtNum(t){
   const v=t.value, pos=t.selectionStart??v.length, sig=v.slice(0,pos).replace(/[^\d,]/g,"").length;

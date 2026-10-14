@@ -144,3 +144,22 @@ button.trk{font-family:inherit;cursor:pointer}
 .acc .ab{font:700 22px/1.2 var(--f-disp)}
 .acc .ab.bad{color:var(--bad)}
 .acc .as{font-size:12px}
+/* Ürünler: tıklanabilir ürün kartı + model satırları */
+:root{--st-irak:#7A4FA0}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--st-irak:#B99BDB}}
+:root[data-theme="dark"]{--st-irak:#B99BDB}
+.pcard{display:block;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:14px 16px;cursor:pointer;transition:border-color .15s}
+.pcard:hover{border-color:var(--accent)}
+.pcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pcard .prod-h{margin-bottom:6px;align-items:center}
+.pcard .chev{font-size:24px;line-height:1;color:var(--muted)}
+.mrows{display:flex;flex-direction:column}
+.mrow2{display:grid;grid-template-columns:minmax(90px,max-content) 1fr;gap:4px 14px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.mrow2:first-child{border-top:0}
+.mrow2 .mn{font-weight:600}
+.mrow2 .mc{display:flex;flex-wrap:wrap;gap:6px}
+.mrow2 .ms{grid-column:2;font-size:12px}
+.stk{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:3px 9px;border-radius:99px;background:color-mix(in srgb,var(--c) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--c) 35%,var(--line))}
+.stk i{width:7px;height:7px;border-radius:50%;background:var(--c)}
+.stk b{font-weight:600}
+@media (max-width:520px){.mrow2{grid-template-columns:1fr}.mrow2 .ms{grid-column:1}}
