@@ -1,0 +1,148 @@
+/* ===== Profesyonel görünüm katmanı (14 Eki → 25 Eki 2026): tek yazı ailesi, sakin renkler, sıkı ritim ===== */
+:root{
+  --bg:#F3F5F4; --surface:#FFFFFF; --surface-2:#F0F3F1; --line:#E2E7E4; --line-2:#D4DBD7; --fg:#15201A; --muted:#5F6D67;
+  --accent:#2F6B33; --accent-ink:#FFFFFF; --accent-soft:#E4EFE1;
+  --firm-a:#2F6B33;
+  --st-depoda:#2F6B33;
+  --good:#23753A; --warn:#A35410; --bad:#B42318; --warn-soft:#FCEFE3; --bad-soft:#FDECEA;
+  --f-disp:var(--f-body);
+  --r:12px; --r-sm:9px;
+  --sh:0 1px 2px rgba(16,24,20,.05),0 1px 3px rgba(16,24,20,.04);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1311; --surface:#151C18; --surface-2:#1B241F; --line:#25302A; --line-2:#313E37; --fg:#E7EDE9; --muted:#97A59E;
+  --accent:#8CC36A; --accent-ink:#0C140B; --accent-soft:#1F2D1A; --firm-a:#8CC36A; --st-depoda:#8CC36A;
+  --sh:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  --bg:#0E1311; --surface:#151C18; --surface-2:#1B241F; --line:#25302A; --line-2:#313E37; --fg:#E7EDE9; --muted:#97A59E;
+  --accent:#8CC36A; --accent-ink:#0C140B; --accent-soft:#1F2D1A; --firm-a:#8CC36A; --st-depoda:#8CC36A;
+  --sh:0 1px 2px rgba(0,0,0,.4);
+}
+body{font:15px/1.5 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"tnum" 0}
+.num,.mono,td.r,.money .v,.row .end .a,.acc .ab,.stk b{font-variant-numeric:tabular-nums}
+
+/* --- başlıklar: büyük harf/dar yazı yerine sade, net --- */
+.brand b{font:600 17px/1 var(--f-body);letter-spacing:-.01em;text-transform:none}
+.brand small{font-size:12px}
+.vh h2{font:600 25px/1.15 var(--f-body);letter-spacing:-.02em;text-transform:none}
+.sh-head h3{font:600 17px/1.25 var(--f-body);letter-spacing:-.01em;text-transform:none}
+.dhead .ttl{font:600 23px/1.2 var(--f-body);letter-spacing:-.02em}
+.dhead .code{font:500 13px/1.3 var(--f-body);gap:8px}
+.sec-h h3,.dsec .h h4,.isec .ih h4,.fsec,.month,.acch{font:600 11.5px/1.3 var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.isec .ih h4{margin-right:auto}
+.month{padding:18px 2px 8px}
+.prod-h h3{font:600 19px/1.2 var(--f-body);letter-spacing:-.01em;text-transform:none}
+.col-h{font:600 12px/1 var(--f-body);letter-spacing:.05em;text-transform:uppercase}
+.money .v,.kpi .v{font:600 19px/1.25 var(--f-body);letter-spacing:-.01em}
+.money .l,.kpi .l{font-size:12px;color:var(--muted);text-transform:none;letter-spacing:0}
+.acc .ab{font:600 21px/1.2 var(--f-body);letter-spacing:-.01em}
+.typeic{font:600 10.5px/1 var(--f-body);letter-spacing:.03em;width:32px;height:32px;border-radius:9px}
+.isec .num{font:600 11.5px/1 var(--f-body)}
+
+/* --- yüzeyler --- */
+.panel,.pcard,.card,.acc,.trackbox,.quick,.chooser button,.note{border-color:var(--line);box-shadow:var(--sh)}
+.panel,.pcard,.acc,.trackbox,.quick,.chooser button{border-radius:var(--r)}
+.money,.kpis{border-radius:var(--r);box-shadow:var(--sh);background:var(--line);border-color:var(--line)}
+.money>div{padding:12px 14px}
+.top{background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:saturate(1.4) blur(10px);-webkit-backdrop-filter:saturate(1.4) blur(10px);border-bottom-color:var(--line)}
+.sheet{background:var(--bg)}
+.sh-head{padding:12px 16px;min-height:58px}
+.sh-body{padding:18px 16px 28px;gap:20px}
+.sh-foot{gap:10px}
+
+/* --- düğmeler ve alanlar --- */
+.btn{height:38px;padding:0 15px;border-radius:var(--r-sm);font-weight:500;font-size:14px;border-color:var(--line-2);box-shadow:0 1px 1px rgba(16,24,20,.03)}
+.btn.sm{height:32px;padding:0 11px;font-size:13px;border-radius:8px}
+.btn.pri{box-shadow:0 1px 2px rgba(16,24,20,.12)}
+.btn:active{transform:translateY(.5px)}
+.iconbtn{width:38px;height:38px;border-radius:var(--r-sm);border-color:var(--line-2)}
+.fld input,.fld select,.fld textarea,.search{border-color:var(--line-2);border-radius:var(--r-sm);padding:10px 12px;min-height:42px}
+.lbl{font-size:12.5px;font-weight:500;color:var(--muted)}
+.seg{border-radius:10px;padding:3px;background:var(--surface-2);border:1px solid var(--line)}
+.seg button{border-radius:8px;font-weight:500;padding:7px 10px}
+.chip{height:32px;padding:0 13px;border-color:var(--line-2);font-weight:500}
+.chip[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.firmsel{border:1px solid var(--line)}
+.firmsel button{font-weight:500}
+
+/* --- satırlar ve tablolar --- */
+.row{padding:12px 16px;gap:12px}
+.row .t{font-weight:500}
+.row .sub{font-size:12.5px;margin-top:1px}
+.row .end .a{font-weight:600}
+th{font-size:11px;font-weight:600;letter-spacing:.06em;padding:10px 16px;background:var(--surface-2)}
+td{padding:11px 16px;border-top-color:var(--line)}
+tfoot td{background:var(--surface-2)}
+.pill{font-size:11.5px;font-weight:600;padding:1px 8px;border-width:1px}
+.badge{font-size:11px;font-weight:600}
+.empty{padding:26px 16px}
+.kv{gap:12px 18px}
+.kv dt{font-size:12px}
+.kv dd{font-weight:500}
+
+/* --- aşama çubuğu: telefonda kesilmesin --- */
+.step{min-width:0}
+.step span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.step small{font-size:10.5px}
+
+/* --- tablolar telefonda kart olur (etiket: değer) --- */
+@media (max-width:640px){
+  table.rt thead{display:none}
+  table.rt,table.rt tbody,table.rt tfoot{display:block}
+  table.rt tr{display:flex;flex-direction:column;gap:3px;padding:12px 16px;border-top:1px solid var(--line)}
+  table.rt tbody tr:first-child{border-top:0}
+  table.rt td{display:flex;justify-content:space-between;gap:12px;padding:0;border:0;white-space:normal;text-align:right;font-size:14px;background:none}
+  table.rt td::before{content:attr(data-l);color:var(--muted);font-size:12.5px;font-weight:500;text-align:left;flex:none}
+  table.rt:not(.has-tt) td:first-child,table.rt td.tt{display:block;text-align:left;font-weight:600;font-size:15px;margin-bottom:3px}
+  table.rt:not(.has-tt) td:first-child::before,table.rt td.tt::before{content:none}
+  table.rt td.tt{order:-1}
+  table.rt td.nil{display:none}
+  table.rt tfoot tr{background:var(--surface-2)}
+  table.rt tfoot td{background:none}
+  .tablewrap:has(table.rt){overflow:visible}
+}
+
+/* --- Alımlar panosu: telefonda boş aşamalar gizli, sütunlar tam genişlik --- */
+@media (max-width:820px){
+  .board .col{width:100%;align-self:stretch}
+  .board .col.empty-col{display:none}
+}
+.col{border:1px solid var(--line);background:var(--surface-2)}
+.card{border-radius:10px}
+
+/* --- belge ekleme: tek düğme + menü --- */
+.docadd{position:relative}
+.docadd>summary{list-style:none}
+.docadd>summary::-webkit-details-marker{display:none}
+.docadd[open]>summary{background:var(--surface-2)}
+.docmenu{position:absolute;right:0;top:calc(100% + 6px);z-index:5;width:min(300px,86vw);background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 10px 30px rgba(16,24,20,.16);padding:10px;display:flex;flex-direction:column;gap:8px}
+.docmenu select{width:100%;border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;background:var(--surface)}
+.docmenu .opt{display:flex;align-items:center;gap:10px;border:0;background:none;padding:9px 8px;border-radius:8px;text-align:left;font-weight:500;cursor:pointer;width:100%}
+.docmenu .opt:hover{background:var(--surface-2)}
+.docmenu .opt svg{color:var(--accent);flex:none}
+
+/* --- mobil: FAB ile aynı işi gören başlık düğmeleri gizli --- */
+@media (max-width:820px){ .vh .fabdup{display:none} .vh{align-items:center} .vh .search{order:3;flex-basis:100%;max-width:none} }
+.tabseg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.tabseg::-webkit-scrollbar{display:none}
+.tabseg button{flex:1 0 auto}
+
+/* --- örnek kayıt uyarısı tek satır --- */
+.banner{border-style:solid;border-color:color-mix(in srgb,var(--warn) 35%,var(--line));padding:10px 14px;font-size:13.5px}
+.banner span{flex:1;min-width:200px}
+
+/* --- takip kutusu, dip notları sakinleşsin --- */
+.trackbox{gap:8px}
+.ihint{font-size:12px}
+.foot-note{font-size:12.5px;margin:0}
+@media (max-width:640px){ table.rt td>.tv{display:block;text-align:right} table.rt td.tt>.tv{text-align:left} }
+.banner b{flex:none}
+@media (max-width:520px){ .banner{flex-direction:column;align-items:flex-start;gap:6px} .banner span{min-width:0} }
+@media (max-width:640px){ table.rt:not(.has-tt) td:first-child>.tv{text-align:left} }
+.lline{align-items:flex-start}
+.lline .main .t{white-space:normal}
+.lline .mdl{font-weight:500;color:var(--muted)}
+.lline .sub{white-space:normal}
+.lline .sub .linkbtn{font:inherit;color:inherit;text-decoration:underline dotted;text-underline-offset:2px;background:none;border:0;padding:0;cursor:pointer}
+.lline .rschips{margin-top:6px}
