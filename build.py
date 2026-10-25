@@ -3,7 +3,7 @@ import re, hashlib
 src=lambda f: open('src/'+f,encoding='utf-8').read()
 # dosya içeriğinden sürüm: güncelleme gelince tarayıcı eski kopyayı kullanmasın
 ver=lambda t: hashlib.sha1(t.encode('utf-8')).hexdigest()[:10]
-V_APP=ver(src('app.js')); V_RT=ver(src('runtime.js')); V_CFG=ver(open('config.js',encoding='utf-8').read())
+V_APP=ver(src('app.js')); V_CALC=ver(src('calc.js')); V_RT=ver(src('runtime.js')); V_CFG=ver(open('config.js',encoding='utf-8').read())
 old=src('header_source.html')
 hs=old.index('<header class="top">'); he=old.index('<script>')
 header=old[hs:he].replace('<b>Parti Defteri</b>','<b>Ürün Defteri</b>').replace('<div id="sheetroot"></div>','<button class="fab" id="fab" type="button" aria-label="Yeni kayıt ekle"><svg width="26" height="26" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>\n<div id="sheetroot"></div>')
@@ -34,10 +34,20 @@ html,body{{margin:0}} img{{max-width:100%}} [hidden]{{display:none!important}}
 {header}<script src="supabase.js"></script>
 <script src="config.js?v={V_CFG}"></script>
 <script src="runtime.js?v={V_RT}"></script>
+<script src="calc.js?v={V_CALC}"></script>
 <script src="app.js?v={V_APP}"></script>
 </body></html>
 '''
 open('index.html','w',encoding='utf-8').write(html)
 open('runtime.js','w',encoding='utf-8').write(src('runtime.js'))
 open('app.js','w',encoding='utf-8').write(src('app.js'))
+open('calc.js','w',encoding='utf-8').write(src('calc.js'))
 print('index.html', len(html))
+# sunucu fonksiyonu da aynı hesap motorunu kullanır: src/calc.js işaretler arasına gömülür
+fn='supabase/functions/defter/index.ts'
+ts=open(fn,encoding='utf-8').read()
+A,B='// <calc.js> (build.py gömer; elle düzenleme)\n','// </calc.js>\n'
+if A in ts:
+    i=ts.index(A)+len(A); j=ts.index(B)
+    ts=ts[:i]+src('calc.js').rstrip()+'\n'+ts[j:]
+    open(fn,'w',encoding='utf-8').write(ts); print(fn,'calc gömüldü')

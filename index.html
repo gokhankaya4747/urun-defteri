@@ -627,6 +627,16 @@ tfoot td{background:var(--surface-2)}
 :root[data-theme="dark"]{--st-kons:#E0A866}
 .ledger tr.sub td{border-top:1px solid var(--line);background:var(--surface-2)}
 .ledger td .muted{font-size:12px}
+.kaprow .kins{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.kaprow .kin{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 8px;border-radius:7px;background:var(--surface-2,color-mix(in srgb,var(--ink,#000) 5%,transparent));font-size:13px}
+.xbtn{border:0;background:none;color:var(--muted);font-size:16px;line-height:1;padding:2px 6px;border-radius:6px;cursor:pointer}
+.xbtn:hover{color:var(--bad);background:var(--bad-soft)}
+:root{--st-ortak:#7A5BB5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--st-ortak:#B49BE6}}
+:root[data-theme="dark"]{--st-ortak:#B49BE6}
+.ledger td:first-child{white-space:normal}
+.ledger td.r{white-space:nowrap}
+@media (max-width:560px){.ledger td{padding:9px 12px}}
 
 </style>
 </head><body>
@@ -652,5 +662,6 @@ tfoot td{background:var(--surface-2)}
 <script src="supabase.js"></script>
 <script src="config.js?v=a7e2af8e99"></script>
 <script src="runtime.js?v=ba6344d64a"></script>
-<script src="app.js?v=79dd575e3a"></script>
+<script src="calc.js?v=0525df5c5f"></script>
+<script src="app.js?v=334a9083cc"></script>
 </body></html>
