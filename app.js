@@ -129,8 +129,9 @@ const payParty = p => partyName(p.partyId,p.party);
 const pkey = (id,name) => id ? "i:"+id : "n:"+key(name);
 const lotProducts = l => uniq(l.items.map(itemProd)).join(" + ");
 const expUSD = x => usd(x.amount,x.cur,x.kur);
-const lists = k => (S.lists[k]?.items?.length ? S.lists[k].items : ({origins:DEF_ORIGINS,expcats:DEF_EXPC,banks:DEF_BANKS,carriers:Object.keys(CARRIERS)}[k]||[]));
-const LISTNAME = {origins:["Menşe ülkeleri","ülke"],expcats:["Masraf türleri","masraf türü"],banks:["Bankalar","banka"],carriers:["Gemi firmaları","gemi firması"]};
+const lists = k => (S.lists[k]?.items?.length ? S.lists[k].items : ({origins:DEF_ORIGINS,expcats:DEF_EXPC,gencats:DEF_GENC,banks:DEF_BANKS,carriers:Object.keys(CARRIERS)}[k]||[]));
+const DEF_GENC = ["Elektrik","Doğalgaz","Su","İnternet / telefon","Kira","Maaş / SGK","Kredi kartı ödemesi","Akaryakıt / araç","Ofis / gündelik","Yemek","Mali müşavir","Vergi / harç","Banka masrafı","Diğer"];
+const LISTNAME = {origins:["Menşe ülkeleri","ülke"],expcats:["Masraf türleri","masraf türü"],gencats:["Genel gider türleri","genel gider türü"],banks:["Bankalar","banka"],carriers:["Gemi firmaları","gemi firması"]};
 const productsSorted = () => Object.entries(S.products).map(([id,p])=>({id,...p})).sort((a,b)=>(a.order??99)-(b.order??99)||String(a.name).localeCompare(String(b.name),"tr"));
 const partiesOf = kind => Object.entries(S.parties).filter(([,p])=>p.kind===kind).map(([id,p])=>({id,...p})).sort((a,b)=>String(a.name).localeCompare(String(b.name),"tr"));
 function modelsOf(pid){
@@ -754,7 +755,8 @@ function sChoose(){
     <div class="chh">Para</div>
     ${b("new-pay-in",'<path d="M12 5v14M19 12l-7 7-7-7"/>',"Tahsilat","Müşteriden ya da ortaktan gelen para")}
     ${b("new-pay-out",'<path d="M12 19V5M5 12l7-7 7 7"/>',"Tedarikçiye ödeme","Ön ödeme, ara ödeme ya da bakiye")}
-    ${b("new-exp",'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',"Masraf","Bizim ödediğimiz masraf: navlun, gümrükçü, depo…")}
+    ${b("new-exp",'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',"İş masrafı","Bir alım ya da satışa ait: navlun, gümrükçü, depo…")}
+    ${b("new-genexp",'<path d="M3 21h18M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/>',"Genel gider","İşe bağlı değil: elektrik, doğalgaz, kira, maaş, kredi kartı…")}
     <div class="chh">Irak işleri</div>
     ${b("new-iexp",'<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>',"Irak'ta ödenen masraf","Alıcının ya da ortağın bizim yerimize ödediği gümrük, vergi, TIR")}
     ${b("new-kap",'<path d="M7 7h11l-3-3M17 17H6l3 3"/>',"Kapama","Elden nakit gönder → resmi havale olarak dön, kur farkı kârı")}
@@ -1524,13 +1526,14 @@ function payForm(p,pre){
 const expLinkLot = x => x.link==="lot" ? lotById(x.lotId) : x.link==="sale" ? SC(saleById(x.saleId)||{}).olot : null;
 function expForm(x,pre){
   const isNew=!x;
-  const v=x?{...x,kurD:x.cur==="IQD"?x.kur:null,link:x.saleId?"sale":x.lotId?"lot":"none",paidBy:x.paidBy==="ortak"?"ortak":"biz",paidByA:x.paidBy==="alici"?"alici":"biz"}:{date:today(),cur:"USD",cat:"Irak gümrüğü",link:"sale",paidBy:"biz",paidByA:"biz",firmId:defFirm(),...(pre||{})};
+  const v=x?{...x,gcat:x.cat,kurD:x.cur==="IQD"?x.kur:null,link:x.saleId?"sale":x.lotId?"lot":"none",paidBy:x.paidBy==="ortak"?"ortak":"biz",paidByA:x.paidBy==="alici"?"alici":"biz"}:{date:today(),cur:"USD",cat:"Irak gümrüğü",link:"sale",paidBy:"biz",paidByA:"biz",firmId:defFirm(),...(pre||{})};
   const saleOpts=()=>[["","Satış seç…"],...S.sales.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(s=>[s.id,`${fds(s.date)} ${String(s.date||"").slice(0,4)} · ${saleCustomer(s)} · ${MK[s.market]||""} · ${saleLinesTxt(s)}`])];
   const svOpts=y=>[["","Hayır, bütün alımın masrafı"],...((lotById(y?.lotId)?.sevk)||[]).map(sv=>[sv.id,`${fds(sv.date)} sevki · ${nf0.format(sum(sv.lines||[],z=>+z.kg||0))} kg${sv.trucker?" · "+sv.trucker:""}`])];
   const lotOpts=()=>[["","Alım seç…"],...S.lots.slice().sort((a,b)=>String(b.code).localeCompare(String(a.code))).map(l=>[l.id,`${l.code} · ${lotProducts(l)} · ${l.ortak?.on?"ortak":firmName(l.firmId)}`])];
   openForm({title:isNew?"Yeni masraf":"Masrafı düzenle", values:v, docTarget:x?{col:"exps",id:x.id}:null, aiKind:"exp", fields:[
     {k:"files",type:"files",label:"Masraf faturası / makbuz"},
-    listSel("cat","expcats","Masraf türü",{req:true}),
+    listSel("cat","expcats","Masraf türü",{req:true,showIf:y=>y.link!=="none"}),
+    listSel("gcat","gencats","Gider türü",{req:true,showIf:y=>y.link==="none",hint:"İşe bağlı olmayan giderler: elektrik, kira, maaş, kredi kartı… Rapor'da “Genel giderler”de görünür, net kârdan düşer."}),
     {k:"link",label:"Hangi işin masrafı?",type:"seg",options:[["sale","Bir satış"],["lot","Bir alım"],["none","Genel"]],hint:"Bağladığın işin kârından düşülür"},
     {k:"saleId",label:"Satış",type:"select",options:saleOpts,showIf:y=>y.link==="sale",req:true},
     {k:"lotId",label:"Alım",type:"select",options:lotOpts,showIf:y=>y.link==="lot",req:true},
@@ -1553,7 +1556,7 @@ function expForm(x,pre){
   onSave: async y=>{
     if(y.cur==="TL") rememberKur(y.kur); if(y.cur==="IQD"&&!(y.kurD>0)) return "Dinar için çarşı kurunu yaz.";
     const doc={...(x||{})}; delete doc.id; delete doc.party; delete doc.kurD;
-    delete doc.sevkId; Object.assign(doc,{cat:y.cat,payee:y.payee||"",date:y.date,amount:y.amount,cur:y.cur,kur:y.cur==="TL"?y.kur:y.cur==="IQD"?y.kurD:null,docNo:y.docNo||"",note:y.note||"",saleId:"",lotId:"",paidBy:expLinkLot(y)?y.paidBy:(y.link==="sale"&&y.paidByA==="alici"?"alici":"biz"),bank:((expLinkLot(y)&&y.paidBy==="ortak")||(!expLinkLot(y)&&y.link==="sale"&&y.paidByA==="alici"))?"":(y.bank||""),firmId:y.firmId||defFirm()});
+    delete doc.sevkId; delete doc.gcat; Object.assign(doc,{cat:y.link==="none"?y.gcat:y.cat,payee:y.payee||"",date:y.date,amount:y.amount,cur:y.cur,kur:y.cur==="TL"?y.kur:y.cur==="IQD"?y.kurD:null,docNo:y.docNo||"",note:y.note||"",saleId:"",lotId:"",paidBy:expLinkLot(y)?y.paidBy:(y.link==="sale"&&y.paidByA==="alici"?"alici":"biz"),bank:((expLinkLot(y)&&y.paidBy==="ortak")||(!expLinkLot(y)&&y.link==="sale"&&y.paidByA==="alici"))?"":(y.bank||""),firmId:y.firmId||defFirm()});
     if(y.link==="sale"){ const s=saleById(y.saleId); doc.saleId=y.saleId; if(s) doc.firmId=s.firmId; }
     else if(y.link==="lot"){ const l=lotById(y.lotId); doc.lotId=y.lotId; if(l) doc.firmId=l.firmId; doc.sevkId=(l?.sevk||[]).some(sv=>sv.id===y.sevkId)?y.sevkId:""; }
     if(isElden(doc.firmId)) doc.bank=(doc.paidBy==="ortak"||doc.paidBy==="alici")?"":ELDEN_KASA;
@@ -2928,7 +2931,7 @@ document.addEventListener("click",e=>{
     if(!db) return;
     if(S.stack[S.stack.length-1]?.type==="choose") S.stack.pop();
     const M={
-      "new-lot":()=>lotForm(null), "new-sale":()=>saleForm(null), "new-pay":()=>payForm(null), "new-pay-out":()=>payForm(null,{dir:"out"}), "new-pay-in":()=>payForm(null,{dir:"in",kind:"Tahsilat"}), "new-exp":()=>expForm(null), "new-kons":()=>saleForm(null,null,true), "new-kap":()=>kapForm({}), "new-iexp":()=>irakExpForm(),
+      "new-lot":()=>lotForm(null), "new-sale":()=>saleForm(null), "new-pay":()=>payForm(null), "new-pay-out":()=>payForm(null,{dir:"out"}), "new-pay-in":()=>payForm(null,{dir:"in",kind:"Tahsilat"}), "new-exp":()=>expForm(null), "new-genexp":()=>expForm(null,{link:"none",cat:"",gcat:""}), "new-kons":()=>saleForm(null,null,true), "new-kap":()=>kapForm({}), "new-iexp":()=>irakExpForm(),
       "edit-lot":()=>lotForm(lotById(d.id)), "edit-sale":()=>saleForm(saleById(d.id)), "edit-pay":()=>{ const p=S.pays.find(p=>p.id===d.id); if(p&&p.dir==="out"&&p.saleId&&saleById(p.saleId)) return buyerPayForm(p.saleId,p); if(p&&isSupRefund(p)) return refundEditForm(p); return payForm(p); }, "edit-exp":()=>expForm(S.exps.find(x=>x.id===d.id)),
       "pay-lot":()=>payForm(null,{dir:"out",lotId:d.id,kind:LC(lotById(d.id)).paid>0?"Bakiye":"Ön ödeme"}),
       "pay-ortak":()=>payForm(null,{dir:"in",target:"l:"+d.id,kind:"Ortak hesap havalesi"}),
