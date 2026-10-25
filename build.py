@@ -51,3 +51,8 @@ if A in ts:
     i=ts.index(A)+len(A); j=ts.index(B)
     ts=ts[:i]+src('calc.js').rstrip()+'\n'+ts[j:]
     open(fn,'w',encoding='utf-8').write(ts); print(fn,'calc gömüldü')
+# hesap motoru testleri: biri bozulursa derleme hata verir, yayına çıkarma
+import subprocess, sys
+r=subprocess.run(['node','tools/test_calc.mjs'],capture_output=True,text=True)
+print((r.stdout+r.stderr).strip())
+if r.returncode: sys.exit('HESAP TESTLERİ BAŞARISIZ — yayına çıkarma')
