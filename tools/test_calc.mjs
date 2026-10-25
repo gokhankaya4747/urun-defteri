@@ -33,19 +33,44 @@ T("örnek veri: maliyet, satış kârı, alacak", () => {
   invariants(D, R, "örnek");
 });
 
-T("kapama: dinar kurlarından kur farkı ve kesinti", () => {
-  const D = base(); D.kap.push({ id: "k1", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 10000, ins: [{ date: "2026-10-03", amt: 11200 }], cRate: 1480, bRate: 1310 });
-  const kc = CALC.kapCalc(D.kap[0]); near(kc.expected, 10000 * 1480 / 1310, "beklenen"); near(kc.kur, 10000 * 1480 / 1310 - 10000, "kur farkı"); near(kc.kes, 10000 * 1480 / 1310 - 11200, "kesinti"); near(kc.gain, 1200, "net");
-  const R = CALC.compute(D); const ev = R.events.filter((e) => e.kind === "kap"); near(ev.reduce((a, e) => a + e.kur - e.kes, 0), 1200, "olaylara dağıtılan net kur farkı");
-  near(R.sale.get("ex-sa1").due, 30700, "kapama gerçek alacağı değiştirmez"); near(R.sale.get("ex-sa1").offPaid, 11200, "resmi gelen");
-  invariants(D, R, "kapama");
+T("kapama: fazla gönderilen nakit — kur farkı sadece bankadan geçen kısımdan, kalan alıcının hesabına", () => {
+  // 12.000 $ elden, çarşı 1.480; fatura kadarı (10.000 $) bankaya 1.310'dan; kalan dinar alıcıda masraflar için
+  const D = base(); D.kap.push({ id: "k1", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 12000, ins: [{ date: "2026-10-03", amt: 10000 }], cRate: 1480, bRate: 1310 });
+  const kc = CALC.kapCalc(D.kap[0]);
+  near(kc.kur, 10000 - 10000 * 1310 / 1480, "kur farkı kârı = resmi gelen − bankaya giden dinarın çarşı maliyeti");
+  near(kc.leftDinar, 12000 * 1480 - 10000 * 1310, "alıcıda kalan dinar");
+  near(kc.left, (12000 * 1480 - 10000 * 1310) / 1480, "alıcıda kalan dolar (çarşı kuruyla)");
+  near(kc.kur - kc.left, 10000 - 12000, "kur farkı − kalan = gelen − giden");
+  let R = CALC.compute(D); near(R.sale.get("ex-sa1").due, 30700 + kc.left, "kalan para alıcının borcuna eklendi");
+  near(R.events.filter((e) => e.kind === "kap").reduce((a, e) => a + e.kur - e.kes, 0), kc.kur, "kâra sadece kur farkı yazıldı (kesinti yok)");
+  // masraflar dinar: vergi 3.000.000 dinar + gümrük/TIR 1.800 $ → kalandan fazla → alıcı cebinden koydu, borcundan düşer
+  D.exps.push({ id: "v", firmId: "a", saleId: "ex-sa1", paidBy: "alici", cat: "Vergi", amount: 3000000, cur: "IQD", kur: 1480, date: "2026-10-04" });
+  D.exps.push({ id: "g", firmId: "a", saleId: "ex-sa1", paidBy: "alici", cat: "TIR", amount: 1800, cur: "USD", date: "2026-10-04" });
+  R = CALC.compute(D);
+  near(R.sale.get("ex-sa1").due, 30700 + kc.left - (3000000 / 1480 + 1800), "alıcı borcu = önce + kalan − yerimize ödediği");
+  const PB = CALC.partyBalances(D, R, () => true); const c1 = PB.cus.find((r) => r.id === "ex-c1"); near(c1.a - c1.p, R.sale.get("ex-sa1").due, "cari = satış alacağı");
+  invariants(D, R, "kapama-fazla");
 });
 
-T("kapama: devamı gelecek → kâra yazılmaz; kursuz kapamada fark = kur farkı", () => {
-  const D = base(); D.kap.push({ id: "k1", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 10000, ins: [{ amt: 6000, date: "2026-10-02" }], done: false });
-  let R = CALC.compute(D); assert.equal(R.events.filter((e) => e.kind === "kap").length, 0, "bekleyen kapama olay üretmemeli"); assert.ok(CALC.kapCalc(D.kap[0]).part);
-  D.kap[0].done = true; D.kap[0].ins.push({ amt: 5100, date: "2026-10-04" }); R = CALC.compute(D);
-  near(CALC.kapCalc(D.kap[0]).kur, 1100, "kursuz kur farkı"); invariants(D, R, "kapama-parça");
+T("kapama: tam fatura kadar gönderilince kalan sıfıra yakın; kursuz kapamada kalan elle", () => {
+  const D = base(); D.kap.push({ id: "k1", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 10000 * 1310 / 1480, ins: [{ amt: 10000, date: "2026-10-02" }], cRate: 1480, bRate: 1310 });
+  near(CALC.kapCalc(D.kap[0]).left, 0, "tam gönderimde kalan yok");
+  D.kap[0] = { id: "k2", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 12000, left: 3000, ins: [{ amt: 10000, date: "2026-10-02" }] };
+  const kc = CALC.kapCalc(D.kap[0]); near(kc.left, 3000, "elle yazılan kalan"); near(kc.kur, 10000 + 3000 - 12000, "kur farkı = gelen + kalan − giden");
+});
+
+T("kapama: devamı gelecek → kâra ve hesaba yazılmaz", () => {
+  const D = base(); D.kap.push({ id: "k1", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 12000, ins: [{ amt: 6000, date: "2026-10-02" }], done: false, cRate: 1480, bRate: 1310 });
+  const R = CALC.compute(D); assert.equal(R.events.filter((e) => e.kind === "kap").length, 0); near(R.sale.get("ex-sa1").due, 30700, "alacak değişmedi");
+  invariants(D, R, "kapama-bekleyen");
+});
+
+T("ortak alım kapaması: kalan ortağın borcuna, kur farkı kâr payına göre", () => {
+  const D = base(); D.kap.push({ id: "k1", firmId: "a", lotId: "ex-l3", date: "2026-10-01", out: 12000, ins: [{ amt: 10000, date: "2026-10-03" }], cRate: 1480, bRate: 1310 });
+  const before = CALC.compute(base()).lot.get("ex-l3"), R = CALC.compute(D), c = R.lot.get("ex-l3"), kc = CALC.kapCalc(D.kap[0]), sh = lot(D, "ex-l3").ortak.share / 100;
+  near(c.totalProfit - before.totalProfit, kc.kur, "kur farkı toplam kâra eklendi");
+  near(c.owe - before.owe, kc.left - (1 - sh) * kc.kur, "ortak borcu: + kalan − ortağın kur farkı payı");
+  invariants(D, R, "ortak-kapama");
 });
 
 T("konsinye: satıldı, geri gelen, kayıp", () => {
