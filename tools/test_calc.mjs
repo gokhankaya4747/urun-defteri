@@ -155,6 +155,18 @@ T("Irak sevkinin navlunu sadece o sevkte giden kg'ye eklenir", () => {
   invariants(D, R, "navlun");
 });
 
+T("maliyet dökümü = son maliyet (alış + masraflar + navlun + satış masrafları − kur farkı, satılabilir kg'ye)", () => {
+  const D = base(); const l = lot(D, "ex-l1"); l.sevk = [{ id: "sv1", date: "2026-10-05", lines: [{ ik: "i1", kg: 1000 }] }]; l.adj = [{ id: "f", date: "2026-10-06", ik: "i1", kg: 50, reason: "fire" }];
+  D.exps.push({ id: "nv", firmId: "a", lotId: "ex-l1", saleId: "", sevkId: "sv1", cat: "TIR navlunu", amount: 500, cur: "USD", date: "2026-10-05" });
+  D.kap.push({ id: "k1", firmId: "a", saleId: "ex-sa1", date: "2026-10-01", out: 12000, ins: [{ date: "2026-10-03", amt: 10000 }], cRate: 1480, bRate: 1310 });
+  const R = CALC.compute(D), b = CALC.costBreakdown(D, R, "ex-l1", "i1"), ci = R.item.get("ex-l1|i1");
+  near(b.perKg, ci.finalCost, "döküm = son maliyet", 1e-6);
+  near(b.sellKg, 9600 - 50, "satılabilir kg");
+  near(b.lines.find((x) => x.group === "alis").total, 9600 * 6.9, "alış");
+  near(b.lines.filter((x) => x.group === "sevk").reduce((a, x) => a + x.total, 0), 500, "navlun");
+  assert.ok(b.lines.some((x) => x.group === "kur" && x.total < 0), "kur farkı kârı maliyeti düşürür");
+});
+
 T("Excel sayfaları = olaylar (Kâr hareketleri toplamı)", () => {
   const D = base(), R = CALC.compute(D);
   const SH = CALC.sheets(D, R, { firm: (x) => x, party: (i, f) => f || i, prod: (it) => it.productId, stage: (l) => l.status });

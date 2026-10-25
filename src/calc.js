@@ -100,7 +100,7 @@ const CALC = (() => {
         else { soldKg = consumed; realAmt = consumed * (+ln.ppk || 0);
           if (ci) { ev({ kind: "sale", date: s.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +ln.kg || 0, rev: usd(amt, s.cur, s.kur), cogs: (+ln.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market });
             for (const r of myRet.filter((r) => r.kind !== "kayip")) ev({ kind: "ret", date: r.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: -(+r.kg || 0), rev: -usd((+r.kg || 0) * (+ln.ppk || 0), s.cur, s.kur), cogs: -(+r.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market }); } }
-        if (ci) { for (const r of myRet.filter((r) => r.kind === "kayip")) ev({ kind: "lost", date: r.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +r.kg || 0, loss: (+r.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market });
+        if (ci) { ci.lostKg = (ci.lostKg || 0) + lost; for (const r of myRet.filter((r) => r.kind === "kayip")) ev({ kind: "lost", date: r.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +r.kg || 0, loss: (+r.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market });
           ci.consumed += consumed; ci.soldKg += soldKg; ci.konsKg += pend; if (ln.loc === "irak") ci.soldIrak += consumed; }
         pendKg += pend; rev += realAmt;
         lines.push({ ln, i, ci, amtUSD: usd(realAmt, s.cur, s.kur), offUSD: usd(amt, s.cur, s.kur), realKg, soldKg, pend, iade, lost, consumed });
@@ -168,7 +168,7 @@ const CALC = (() => {
 
     // 6) son maliyet / kg: şu ana kadarki tüm masraflar ve kur farkı dahil, fire ve iade düşülmüş kg başına
     for (const ci of item.values()) {
-      const net = ci.kgIn - ci.adjKg - ci.supRetKg;
+      const net = ci.kgIn - ci.adjKg - ci.supRetKg - (ci.lostKg || 0); // satılabilir kg: fire, tedarikçiye iade ve konsinyede kaybolan düşülür
       ci.finalCost = net > 0 ? (ci.kgIn * landedOf(ci) + (ci.sevkExp || 0) - (ci.credAmt || 0) + ci.saleExp - ci.saleKur) / net : landedOf(ci);
     }
     return { item, lot, sale, events, unalloc, payUSD };
@@ -264,5 +264,28 @@ const CALC = (() => {
     return out;
   }
 
-  return { compute, partyBalances, sheets, kapCalc, kapSum, itemStock, irakLeft, hereLeft, landedOf, landedIrakOf, isCashPay, usd, sum };
+  /* Maliyet dökümü (bir alım kalemi): şimdiye kadar bu mal için harcanan ve kazanılan her şey ÷ satılabilir kg = son maliyet / kg.
+     Alım masrafları kalemlere kg payıyla, sevk navlunu o sevkte giden kg'ye, satış (konsinye dahil) masrafları ve kur farkları satış satırlarına kg payıyla dağıtılmış olarak gelir. */
+  function costBreakdown(D, R, lotId, ik) {
+    const ci = R.item.get(lotId + "|" + ik); if (!ci) return null; const l = ci.lot;
+    const kgIn = sum(l.items, (it) => +it.kg || 0) || 1, sh = ci.kgIn / kgIn;
+    const lines = []; const add = (group, label, total) => { if (Math.abs(total) < 0.005) return; const x = lines.find((y) => y.group === group && y.label === label); if (x) x.total += total; else lines.push({ group, label, total }); };
+    add("alis", "Alış fiyatı", ci.kgIn * ci.cu);
+    const okSv = (x) => x.sevkId && !isIrakDest(l) && (l.sevk || []).some((v) => v.id === x.sevkId && sum(v.lines || [], (z) => +z.kg || 0) > 0);
+    for (const x of (D.exps || []).filter((x) => x.lotId === l.id && !x.saleId)) {
+      if (okSv(x)) { const sv = l.sevk.find((v) => v.id === x.sevkId), svKg = sum(sv.lines, (z) => +z.kg || 0), my = sum(sv.lines.filter((z) => z.ik === ik), (z) => +z.kg || 0); add("sevk", `${x.cat || "Masraf"} (Irak sevki)`, expUSD(x) * my / svKg); }
+      else add("alim", x.cat || "Alım masrafı", expUSD(x) * sh);
+    }
+    for (const r of (l.cred || [])) { if (+r.kg > 0) { if (r.ik === ik) add("ind", "Tedarikçiye mal iadesi (alacak dekontu)", -usd(r.amount, r.cur, r.kur)); } else add("ind", "Tedarikçi fiyat indirimi", -usd(r.amount, r.cur, r.kur) * sh); }
+    for (const e of R.events) { if (e.ci !== ci) continue;
+      if (e.kind === "sexp") add("satis", e.rec?.cat || "Satış masrafı", e.exp || 0);
+      else if (e.kind === "kap") add("kur", "Kur farkı kârı (kapama)", -((e.kur || 0) - (e.kes || 0)));
+      else if (e.kind === "fx") add("kur", "TL kur farkı", -(e.kur || 0)); }
+    const totalCost = sum(lines, (x) => x.total);
+    const fireKg = ci.adjKg || 0, supRetKg = ci.supRetKg || 0, lostKg = ci.lostKg || 0, sellKg = ci.kgIn - fireKg - supRetKg - lostKg;
+    const sold = R.events.filter((e) => e.ci === ci && (e.kind === "sale" || e.kind === "ret")), soldKg = sum(sold, (e) => e.kg || 0), rev = sum(sold, (e) => e.rev || 0);
+    return { ci, lines, totalCost, kgIn: ci.kgIn, fireKg, supRetKg, lostKg, sellKg, perKg: sellKg > 0 ? totalCost / sellKg : null, soldKg, rev, avgPrice: soldKg > 0 ? rev / soldKg : null, stockKg: itemStock(ci) + (ci.konsKg || 0) };
+  }
+
+  return { compute, partyBalances, sheets, costBreakdown, kapCalc, kapSum, itemStock, irakLeft, hereLeft, landedOf, landedIrakOf, isCashPay, usd, sum };
 })();
