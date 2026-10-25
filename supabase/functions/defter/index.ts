@@ -224,53 +224,63 @@ function digestHtml(M: ReturnType<typeof model>) {
   const t = todayTR();
   const weekAgo = iso(new Date(Date.parse(t) - 7 * 864e5));
   const lotLabel = (l: any) => `${esc(l.code)} · ${esc([...new Set(l.items.map((it: any) => `${M.prodName(it)}${it.model ? " " + it.model : ""}`))].join(", "))}`;
+  // Firmalar ve "Elden" (firmasız) kayıtlar ayrı bölümlerde
+  const section = (fil: (firmId: string) => boolean) => {
+  const F = { ...M, lots: M.lots.filter((x: any) => fil(x.firmId)), sales: M.sales.filter((x: any) => fil(x.firmId)), pays: M.pays.filter((x: any) => fil(x.firmId)), exps: M.exps.filter((x: any) => fil(x.firmId)), items: new Map([...M.items].filter(([, ci]: any) => fil(ci.lot.firmId))) };
+  { const M = F; let h = "";
   // gelecek / geciken konteynerler
-  const coming = M.lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && l.eta && daysTo(l.eta) <= 21).sort((a: any, b: any) => a.eta.localeCompare(b.eta));
-  const noEta = M.lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && !l.eta);
-  // stok: ürün → model
-  const stock = new Map<string, Map<string, { kg: number; cost: number }>>();
-  for (const ci of M.items.values()) {
-    if (ci.lot.status !== "depoda") continue; const left = (+ci.it.kg || 0) - ci.sold; if (left <= 0) continue;
-    const irak = ci.lot.dest === "irak" ? left : Math.max(0, ci.irakIn - ci.soldIrak), here = left - irak;
-    const p = M.prodName(ci.it); if (!stock.has(p)) stock.set(p, new Map());
-    const m = stock.get(p)!;
-    for (const [k, kg] of [[ci.it.model || "—", here], [`${ci.it.model || "—"} · Irak deposu`, irak]] as [string, number][]) { if (kg <= 0) continue; const r = m.get(k) || { kg: 0, cost: 0 }; r.kg += kg; r.cost += kg * ci.cu; m.set(k, r); }
-  }
-  // borç / alacak
-  const sup = new Map<string, { a: number; p: number }>(), cus = new Map<string, { a: number; p: number; oldest: string }>();
-  for (const l of M.lots) { const c = M.lotC.get(l.id); const k = M.pname(l.supplierId, l.supplier); const r = sup.get(k) || { a: 0, p: 0 }; r.a += c.costUSD; sup.set(k, r); }
-  const isCus = (id: string) => M.parties[id]?.kind === "customer";
-  for (const p of M.pays.filter((x: any) => x.dir === "out" && !isCus(x.partyId))) { const k = M.pname(p.partyId, p.party); const r = sup.get(k) || { a: 0, p: 0 }; r.p += usd(p.amount, p.cur, p.kur); sup.set(k, r); }
-  for (const s of M.sales) { const c = M.saleC.get(s.id); if (c.olot) continue; const k = M.pname(s.customerId, s.customer); const r = cus.get(k) || { a: 0, p: 0, oldest: "" }; r.a += c.revUSD + c.gave; r.p += c.buyerExp; if (c.due > 1 && (!r.oldest || s.date < r.oldest)) r.oldest = s.date; cus.set(k, r); }
-  for (const p of M.pays.filter((x: any) => x.dir === "in" && !x.lotId)) { const k = M.pname(p.partyId, p.party); const r = cus.get(k) || { a: 0, p: 0, oldest: "" }; r.p += usd(p.amount, p.cur, p.kur); cus.set(k, r); }
-  const supRows = [...sup].map(([n, r]) => [n, r.a - r.p] as [string, number]).filter(([, b]) => b > 1).sort((a, b) => b[1] - a[1]);
-  const cusRows = [...cus].map(([n, r]) => [n, r.a - r.p, r.oldest] as [string, number, string]).filter(([, b]) => b > 1).sort((a, b) => b[1] - a[1]);
-  const ortak = M.lots.filter((l: any) => l.ortak?.on && (M.lotC.get(l.id)?.odue || 0) > 1);
-  // geçen hafta
-  const wk = (arr: any[], f: string) => arr.filter((x) => (x[f] || "") >= weekAgo && (x[f] || "") <= t);
-  const wLots = wk(M.lots, "orderDate"), wSales = wk(M.sales, "date"), wOut = wk(M.pays.filter((p: any) => p.dir === "out"), "date"), wIn = wk(M.pays.filter((p: any) => p.dir === "in"), "date"), wExp = wk(M.exps, "date");
-  const S = (arr: any[], f: (x: any) => number) => usdf(sum(arr, f));
+    const coming = M.lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && l.eta && daysTo(l.eta) <= 21).sort((a: any, b: any) => a.eta.localeCompare(b.eta));
+    const noEta = M.lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && !l.eta);
+    // stok: ürün → model
+    const stock = new Map<string, Map<string, { kg: number; cost: number }>>();
+    for (const ci of M.items.values()) {
+      if (ci.lot.status !== "depoda") continue; const left = (+ci.it.kg || 0) - ci.sold; if (left <= 0) continue;
+      const irak = ci.lot.dest === "irak" ? left : Math.max(0, ci.irakIn - ci.soldIrak), here = left - irak;
+      const p = M.prodName(ci.it); if (!stock.has(p)) stock.set(p, new Map());
+      const m = stock.get(p)!;
+      for (const [k, kg] of [[ci.it.model || "—", here], [`${ci.it.model || "—"} · Irak deposu`, irak]] as [string, number][]) { if (kg <= 0) continue; const r = m.get(k) || { kg: 0, cost: 0 }; r.kg += kg; r.cost += kg * ci.cu; m.set(k, r); }
+    }
+    // borç / alacak
+    const sup = new Map<string, { a: number; p: number }>(), cus = new Map<string, { a: number; p: number; oldest: string }>();
+    for (const l of M.lots) { const c = M.lotC.get(l.id); const k = M.pname(l.supplierId, l.supplier); const r = sup.get(k) || { a: 0, p: 0 }; r.a += c.costUSD; sup.set(k, r); }
+    const isCus = (id: string) => M.parties[id]?.kind === "customer";
+    for (const p of M.pays.filter((x: any) => x.dir === "out" && !isCus(x.partyId))) { const k = M.pname(p.partyId, p.party); const r = sup.get(k) || { a: 0, p: 0 }; r.p += usd(p.amount, p.cur, p.kur); sup.set(k, r); }
+    for (const s of M.sales) { const c = M.saleC.get(s.id); if (c.olot) continue; const k = M.pname(s.customerId, s.customer); const r = cus.get(k) || { a: 0, p: 0, oldest: "" }; r.a += c.revUSD + c.gave; r.p += c.buyerExp; if (c.due > 1 && (!r.oldest || s.date < r.oldest)) r.oldest = s.date; cus.set(k, r); }
+    for (const p of M.pays.filter((x: any) => x.dir === "in" && !x.lotId)) { const k = M.pname(p.partyId, p.party); const r = cus.get(k) || { a: 0, p: 0, oldest: "" }; r.p += usd(p.amount, p.cur, p.kur); cus.set(k, r); }
+    const supRows = [...sup].map(([n, r]) => [n, r.a - r.p] as [string, number]).filter(([, b]) => b > 1).sort((a, b) => b[1] - a[1]);
+    const cusRows = [...cus].map(([n, r]) => [n, r.a - r.p, r.oldest] as [string, number, string]).filter(([, b]) => b > 1).sort((a, b) => b[1] - a[1]);
+    const ortak = M.lots.filter((l: any) => l.ortak?.on && (M.lotC.get(l.id)?.odue || 0) > 1);
+    // geçen hafta
+    const wk = (arr: any[], f: string) => arr.filter((x) => (x[f] || "") >= weekAgo && (x[f] || "") <= t);
+    const wLots = wk(M.lots, "orderDate"), wSales = wk(M.sales, "date"), wOut = wk(M.pays.filter((p: any) => p.dir === "out"), "date"), wIn = wk(M.pays.filter((p: any) => p.dir === "in"), "date"), wExp = wk(M.exps, "date");
+    const S = (arr: any[], f: (x: any) => number) => usdf(sum(arr, f));
+  
+  h += `<h2 style="${css.h2}">Geçen 7 gün</h2>${tbl(["", "Adet", "Tutar"], [
+      ["Yeni alım", String(wLots.length), S(wLots, (l) => M.lotC.get(l.id).costUSD)],
+      ["Satış", String(wSales.length), S(wSales, (s) => M.saleC.get(s.id).totUSD)],
+      ["Tedarikçiye ödeme", String(wOut.length), S(wOut, (p) => usd(p.amount, p.cur, p.kur))],
+      ["Tahsilat", String(wIn.length), S(wIn, (p) => usd(p.amount, p.cur, p.kur))],
+      ["Masraf", String(wExp.length), S(wExp, (x) => usd(x.amount, x.cur, x.kur))],
+    ], [1, 2])}`;
+    const via = (l: any) => esc((l.transport === "tir" ? ["TIR", l.trucker, ...(l.plates || [])] : [l.carrier]).filter(Boolean).join(" · ") || "—") + (l.dest === "irak" ? " → Irak deposu" : "");
+    h += `<h2 style="${css.h2}">Yoldaki mallar</h2>`;
+    h += coming.length || noEta.length ? tbl(["Alım", "Gemi / nakliye", "Tahmini varış", ""], [
+      ...coming.map((l: any) => { const d = daysTo(l.eta); return [lotLabel(l), via(l), fd(l.eta), d < 0 ? `<b style="color:#B3261E">${-d} gün gecikti</b>` : d === 0 ? "<b>bugün</b>" : `${d} gün`]; }),
+      ...noEta.map((l: any) => [lotLabel(l), via(l), "girilmedi", ST[l.status]]),
+    ], [3]) : `<p style="${css.muted}">Yolda mal yok.</p>`;
+    h += `<h2 style="${css.h2}">Depodaki stok (Mersin SB ve Irak deposu)</h2>`;
+    h += stock.size ? [...stock].map(([p, m]) => `<div style="font-weight:bold;margin:10px 0 2px">${esc(p)}</div>${tbl(["Model", "Kalan", "Maliyet"], [...m].map(([k, r]) => [esc(k), fmt0.format(Math.round(r.kg)) + " kg", "$" + fmt2.format(r.cost / r.kg) + "/kg"]), [1, 2])}`).join("") : `<p style="${css.muted}">Serbest bölgede stok yok.</p>`;
+    h += `<h2 style="${css.h2}">Tedarikçilere kalan borç</h2>` + (supRows.length ? tbl(["Tedarikçi", "Kalan"], supRows.map(([n, b]) => [esc(n), usdf(b)]), [1]) : `<p style="${css.muted}">Borç yok.</p>`);
+    h += `<h2 style="${css.h2}">Müşteri alacakları</h2>` + (cusRows.length ? tbl(["Müşteri", "Kalan", "En eski"], cusRows.map(([n, b, o]) => { const g = o ? -daysTo(o) : 0; return [esc(n), usdf(b), o ? `${fd(o)}${g > 30 ? ` · <b style="color:#A8530F">${g} gün</b>` : ""}` : "—"]; }), [1]) : `<p style="${css.muted}">Açık alacak yok.</p>`);
+    if (ortak.length) h += `<h2 style="${css.h2}">Ortak alımlardan beklenen</h2>` + tbl(["Alım", "Ortak", "Kalan"], ortak.map((l: any) => [lotLabel(l), esc(M.pname(l.ortak.partnerId)), usdf(M.lotC.get(l.id).odue)]), [2]);
+  
+  return h; } };
+  const hasElden = [M.lots, M.sales, M.pays, M.exps].some((a) => a.some((x: any) => x.firmId === "x"));
   let h = `<div style="${css.wrap}"><div style="padding:22px 20px">
   <div style="font-size:12px;color:#4A7426;font-weight:bold;letter-spacing:.1em">ÜRÜN DEFTERİ</div>
-  <h1 style="${css.h1}">Haftalık özet</h1><div style="${css.muted}">${fd(t)} · ${esc(Object.values(M.firms).map((f: any) => f.name).join(" · "))}</div>`;
-  h += `<h2 style="${css.h2}">Geçen 7 gün</h2>${tbl(["", "Adet", "Tutar"], [
-    ["Yeni alım", String(wLots.length), S(wLots, (l) => M.lotC.get(l.id).costUSD)],
-    ["Satış", String(wSales.length), S(wSales, (s) => M.saleC.get(s.id).totUSD)],
-    ["Tedarikçiye ödeme", String(wOut.length), S(wOut, (p) => usd(p.amount, p.cur, p.kur))],
-    ["Tahsilat", String(wIn.length), S(wIn, (p) => usd(p.amount, p.cur, p.kur))],
-    ["Masraf", String(wExp.length), S(wExp, (x) => usd(x.amount, x.cur, x.kur))],
-  ], [1, 2])}`;
-  const via = (l: any) => esc((l.transport === "tir" ? ["TIR", l.trucker, ...(l.plates || [])] : [l.carrier]).filter(Boolean).join(" · ") || "—") + (l.dest === "irak" ? " → Irak deposu" : "");
-  h += `<h2 style="${css.h2}">Yoldaki mallar</h2>`;
-  h += coming.length || noEta.length ? tbl(["Alım", "Gemi / nakliye", "Tahmini varış", ""], [
-    ...coming.map((l: any) => { const d = daysTo(l.eta); return [lotLabel(l), via(l), fd(l.eta), d < 0 ? `<b style="color:#B3261E">${-d} gün gecikti</b>` : d === 0 ? "<b>bugün</b>" : `${d} gün`]; }),
-    ...noEta.map((l: any) => [lotLabel(l), via(l), "girilmedi", ST[l.status]]),
-  ], [3]) : `<p style="${css.muted}">Yolda mal yok.</p>`;
-  h += `<h2 style="${css.h2}">Depodaki stok (Mersin SB ve Irak deposu)</h2>`;
-  h += stock.size ? [...stock].map(([p, m]) => `<div style="font-weight:bold;margin:10px 0 2px">${esc(p)}</div>${tbl(["Model", "Kalan", "Maliyet"], [...m].map(([k, r]) => [esc(k), fmt0.format(Math.round(r.kg)) + " kg", "$" + fmt2.format(r.cost / r.kg) + "/kg"]), [1, 2])}`).join("") : `<p style="${css.muted}">Serbest bölgede stok yok.</p>`;
-  h += `<h2 style="${css.h2}">Tedarikçilere kalan borç</h2>` + (supRows.length ? tbl(["Tedarikçi", "Kalan"], supRows.map(([n, b]) => [esc(n), usdf(b)]), [1]) : `<p style="${css.muted}">Borç yok.</p>`);
-  h += `<h2 style="${css.h2}">Müşteri alacakları</h2>` + (cusRows.length ? tbl(["Müşteri", "Kalan", "En eski"], cusRows.map(([n, b, o]) => { const g = o ? -daysTo(o) : 0; return [esc(n), usdf(b), o ? `${fd(o)}${g > 30 ? ` · <b style="color:#A8530F">${g} gün</b>` : ""}` : "—"]; }), [1]) : `<p style="${css.muted}">Açık alacak yok.</p>`);
-  if (ortak.length) h += `<h2 style="${css.h2}">Ortak alımlardan beklenen</h2>` + tbl(["Alım", "Ortak", "Kalan"], ortak.map((l: any) => [lotLabel(l), esc(M.pname(l.ortak.partnerId)), usdf(M.lotC.get(l.id).odue)]), [2]);
+  <h1 style="${css.h1}">Haftalık özet</h1><div style="${css.muted}">${fd(t)} · ${esc(["a", "b"].map((k) => M.firms[k]?.name || ({ a: "Asya Çerez", b: "Gökhan Altın" } as any)[k]).join(" · "))}</div>`;
+  h += section((f) => f !== "x");
+  if (hasElden) h += `<div style="margin-top:30px;padding-top:6px;border-top:3px solid #8B6F47"><h1 style="${css.h1}">Elden (firmasız)</h1><div style="${css.muted}">Faturasız, firmalara girmeyen alım-satımlar</div></div>` + section((f) => f === "x");
   h += `<div style="margin:28px 0 6px"><a href="${SITE}" style="background:#4A7426;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:bold;display:inline-block">Defteri aç</a></div>
   <p style="${css.muted}">Tutarlar dolar karşılığıdır. Bu e-posta her pazartesi Ürün Defteri'ne kayıtlı herkese gönderilir.</p></div></div>`;
   return h;
@@ -284,7 +294,7 @@ function backupHtml(M: ReturnType<typeof model>, n: number) {
 function buildXlsx(XLSX: any, M: ReturnType<typeof model>) {
   const wb = XLSX.utils.book_new(); const r2 = (n: number) => Math.round((+n || 0) * 100) / 100;
   const add = (rows: any[], name: string) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ "": "Kayıt yok" }]), name);
-  const firm = (id: string) => M.firms[id]?.name || id;
+  const firm = (id: string) => id === "x" ? "Elden (firmasız)" : M.firms[id]?.name || id;
   add(M.lots.flatMap((l: any) => { const c = M.lotC.get(l.id); return l.items.map((it: any) => { const ci = M.items.get(l.id + "|" + it.k); return { "Kod": l.code, "Firma": firm(l.firmId), "Tedarikçi": M.pname(l.supplierId, l.supplier), "Menşe": l.origin, "Ürün": M.prodName(it), "Model": it.model, "Miktar kg": +it.kg || 0, "Fiyat /kg": it.ppk, "Para birimi": l.cur, "Kur": l.cur === "TL" ? l.kur : "", "Satılan kg": ci?.sold || 0, "Kalan kg": (+it.kg || 0) - (ci?.sold || 0), "Irak'ta kalan kg": ci ? Math.max(0, l.dest === "irak" ? (+it.kg || 0) - ci.sold : ci.irakIn - ci.soldIrak) : 0, "Aşama": l.status === "depoda" ? (l.dest === "irak" ? "Irak deposu" : "Mersin SB") : ST[l.status], "Varış yeri": l.dest === "irak" ? "Doğrudan Irak deposu" : "Mersin SB", "Alım USD": r2(c.costUSD), "Ödenen USD": r2(c.paid), "Kalan borç USD": r2(c.due), "Kâr USD": r2(c.profit), "Ortak": l.ortak?.on ? M.pname(l.ortak.partnerId) : "", "Sipariş": l.orderDate, "Tahmini varış": l.eta, "Varış": l.arriveDate, "Taşıma": l.transport === "tir" ? "TIR" : "Gemi", "Gemi firması": l.carrier || "", "Nakliye firması": l.trucker || "", "TIR plakası": (l.plates || []).join(", "), "CMR": l.cmr || "", "Konteyner": (Array.isArray(l.cntNos) ? l.cntNos : [l.cntNos]).filter(Boolean).join(", "), "B/L": l.bl || "", "Booking": l.booking || "", "Fatura no": l.invoiceNo || "", "Not": l.note }; }); }), "Alımlar");
   add(M.sales.flatMap((s: any) => s.items.map((ln: any) => { const ci = M.items.get(ln.lotId + "|" + ln.ik); return { "Tarih": s.date, "Firma": firm(s.firmId), "Müşteri": M.pname(s.customerId, s.customer), "Pazar": MK[s.market] || s.market, "Alım": ci?.lot.code, "Stok yeri": ln.loc === "irak" || ci?.lot.dest === "irak" ? "Irak deposu" : "Mersin SB", "Ürün": ci ? M.prodName(ci.it) : "", "Model": ci?.it.model || "", "Miktar kg": +ln.kg || 0, "Fiyat /kg": ln.ppk, "Para birimi": s.cur, "Kur": s.cur === "TL" ? s.kur : "", "Tutar USD": r2(usd((+ln.kg || 0) * (+ln.ppk || 0), s.cur, s.kur)), "Fatura no": s.docNo || "", "Plaka": s.plate || "" }; })), "Satışlar");
   add(M.pays.map((p: any) => ({ "Tarih": p.date, "Tür": p.dir === "out" ? "Ödeme" : "Tahsilat", "Firma": firm(p.firmId), "Kime/kimden": M.pname(p.partyId, p.party), "Açıklama": p.kind, "Banka": p.bank || "", "Tutar": +p.amount || 0, "Para birimi": p.cur, "Kur": p.cur === "TL" ? p.kur : "", "Tutar USD": r2(usd(p.amount, p.cur, p.kur)), "Not": p.note })), "Ödemeler");
@@ -395,7 +405,7 @@ const CUMLE_SCHEMA = {
   required: ["kind", "firm", "date", "currency", "party", "market", "items", "amount", "bank", "pay_kind", "expense_category", "link_ref", "due_date", "doc_no", "plate", "note", "warnings"],
   properties: {
     kind: { type: "string", enum: ["sale", "pay_out", "pay_in", "exp", "belirsiz"] },
-    firm: { type: "string", enum: ["a", "b", ""] },
+    firm: { type: "string", enum: ["a", "b", "x", ""] },
     date: { type: "string", description: "YYYY-MM-DD; söylenmediyse bugün" },
     currency: { type: "string", enum: ["USD", "TL", "EUR", ""] },
     party: { type: "string", description: "satışta/tahsilatta müşteri, ödemede tedarikçi, masrafta parayı alan kişi/firma" },
@@ -434,7 +444,7 @@ Kayıt türü (kind):
 - pay_in: müşteriden ya da ortaktan para geldi ("tahsil ettim", "para geldi", "yatırdı").
 - exp: masraf ödedik (gümrük, TIR navlunu, gümrükçü, nakliye, ilaçlama, liman vb.).
 - belirsiz: hangisi olduğu anlaşılmıyorsa; warnings'e nedenini yaz.
-Firmalarımız: a = ${ctx.firms?.[0] || "Asya Çerez"}, b = ${ctx.firms?.[1] || "Gökhan Altın"}. Cümlede firma geçmiyorsa firm boş bırak ve bunun için uyarı YAZMA (firma bağlı alımdan/satıştan bulunur).
+Firmalarımız: a = ${ctx.firms?.[0] || "Asya Çerez"}, b = ${ctx.firms?.[1] || "Gökhan Altın"}. x = Elden (firmasız): faturasız, hiçbir firmaya girmeyen elden alım-satım; cümlede "elden", "faturasız", "firmasız", "kayıtsız" geçiyorsa firm = x. Cümlede firma geçmiyorsa firm boş bırak ve bunun için uyarı YAZMA (firma bağlı alımdan/satıştan bulunur).
 Ürünler (Türkçe katalog adıyla yaz): ${(ctx.products || []).join(", ")}. Modeller: ${JSON.stringify(ctx.models || {})}. "W320", "23/25" gibi kalibreler model alanına.
 Miktar: ton ×1000 kg; "6 ton" = 6000. Fiyat her zaman kg başına: "tonu 8600 dolar" → 8.6; "kilosu 8,6" → 8.6. Türkçe sayılarda nokta binlik, virgül ondalıktır ("410.800" = 410800, "8,6" = 8.6). "bin", "milyon" kelimelerini sayıya çevir.
 Para birimi: dolar/$ → USD, TL/lira/₺ → TL, euro → EUR. Söylenmediyse boş.

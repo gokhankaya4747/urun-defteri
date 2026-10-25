@@ -180,3 +180,9 @@ button.trk{font-family:inherit;cursor:pointer}
 .kaprow .kbtns{flex-basis:100%;display:flex;gap:6px;justify-content:flex-end}
 .rsline .main .t{white-space:normal}
 .rschips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+/* Elden (firmasız) */
+:root{--firm-x:#8B6F47}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--firm-x:#C9A97A}}
+:root[data-theme="dark"]{--firm-x:#C9A97A}
+.acch{font:700 15px/1.2 var(--f-disp);letter-spacing:.04em;text-transform:uppercase;margin:18px 0 8px}
+.acch:first-of-type{margin-top:4px}
