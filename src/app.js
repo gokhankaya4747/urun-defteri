@@ -321,22 +321,43 @@ function vAlimlar(){
 
 /* --- Satışlar --- */
 const saleLinesTxt = s => SC(s).lines.map(({ln,ci})=>`${ci?itemLabel(ci.it):"?"} ${nf0.format(+ln.kg||0)} kg`).join(" + ");
+/* Satışlar: normal satışlar + konsinyeden gerçekten satılan kısım. Konsinye: müşteriye gönderilen, durumu ile. */
+const konsSold = s => SC(s).lines.reduce((a,x)=>a+(x.realKg||0),0);
+const konsLastSold = s => (s.real||[]).map(r=>r.date).sort().pop()||s.date;
+const konsSoldTxt = s => SC(s).lines.filter(x=>x.realKg>0.5).map(x=>`${x.ci?itemLabel(x.ci.it):"?"} ${nf0.format(x.realKg)} kg`).join(" + ");
 function vSatislar(){
+  const tab=S.satv||"sat";
   const all=S.sales.filter(inFirm).filter(s=>S.prod==="all"||saleHasProd(s,S.prod));
-  const sales=all.filter(s=>S.market==="all"||s.market===S.market).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-  const cnt=k=>all.filter(s=>s.market===k).length;
-  let h=`<div class="vh"><h2>Satışlar</h2>${canWrite&&db?`<button class="btn pri fabdup" type="button" data-act="new-sale">+ Yeni satış</button>`:""}</div>`;
+  const kons=all.filter(s=>s.realLater), konsOpen=kons.filter(s=>SC(s).pendKg>0.5);
+  const base=tab==="kon"?kons:all.filter(s=>!s.realLater||konsSold(s)>0.5);
+  const dateOf=s=>tab==="sat"&&s.realLater?konsLastSold(s):s.date;
+  const list=base.filter(s=>S.market==="all"||s.market===S.market).sort((a,b)=>String(dateOf(b)).localeCompare(String(dateOf(a))));
+  const cnt=k=>base.filter(s=>s.market===k).length;
+  let h=`<div class="vh"><h2>Satışlar</h2>${canWrite&&db?(tab==="kon"?`<button class="btn pri fabdup" type="button" data-act="new-kons">+ Konsinye gönderim</button>`:`<button class="btn pri fabdup" type="button" data-act="new-sale">+ Yeni satış</button>`):""}</div>`;
+  h+=`<div class="seg tabseg" role="radiogroup" style="max-width:420px">${[["sat","Satışlar"],["kon",`Konsinye${konsOpen.length?` · ${konsOpen.length} bekliyor`:""}`]].map(([k,t2])=>`<button type="button" role="radio" data-act="sat-tab" data-k="${k}" aria-checked="${tab===k}">${t2}</button>`).join("")}</div>`;
   h+=prodChips();
-  h+=`<div class="chips" role="group" aria-label="Pazar"><button type="button" class="chip" data-market="all" aria-pressed="${S.market==="all"}">Tüm pazarlar <span class="c">${all.length}</span></button>${Object.entries(MK).map(([k,t])=>`<button type="button" class="chip" data-market="${k}" aria-pressed="${S.market===k}">${t} <span class="c">${cnt(k)}</span></button>`).join("")}</div>`;
-  if(!sales.length) return h+`<div class="panel"><div class="empty">${all.length?"Bu seçime uyan satış yok.":"Henüz satış yok. Bir alımdan satış yaptığında <b>+ Yeni satış</b> ile gir; o modelin stoğu otomatik düşer."}</div></div>`;
-  h+=`<div class="panel"><div class="tablewrap"><table><thead><tr><th>Tarih</th><th>Müşteri</th><th>Pazar</th><th>Mallar</th><th class="r">Tutar</th><th class="r">Kalan alacak</th></tr></thead><tbody>${sales.map(s=>{const c=SC(s); return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(s.date)}</td><td class="tt">${esc(saleCustomer(s))}${c.olot?` <span class="badge">Ortak</span>`:""}</td><td>${esc(MK[s.market]||"—")}</td><td style="white-space:normal;min-width:200px">${esc(saleLinesTxt(s))}</td><td class="r">${moneyf(c.tot,s.cur)}${s.cur==="TL"?`<br><span class="muted" style="font-size:12px">${usdf(c.totUSD)}</span>`:""}</td><td class="r" style="color:${c.olot?"var(--muted)":c.due>1?"var(--warn)":"var(--good)"}">${c.olot?"Ortak hesabında":c.due>1?usdf(c.due):"Tahsil edildi"}</td></tr>`;}).join("")}</tbody></table></div></div>`;
+  h+=`<div class="chips" role="group" aria-label="Pazar"><button type="button" class="chip" data-market="all" aria-pressed="${S.market==="all"}">Tüm pazarlar <span class="c">${base.length}</span></button>${Object.entries(MK).map(([k,t2])=>`<button type="button" class="chip" data-market="${k}" aria-pressed="${S.market===k}">${t2} <span class="c">${cnt(k)}</span></button>`).join("")}</div>`;
+  if(!list.length) return h+`<div class="panel"><div class="empty">${tab==="kon"?"Konsinyede mal yok. Müşteriye satılmadan bırakılan malı <b>+ Konsinye gönderim</b> ile gir; satıldıkça satış sayfasından “Satıldı” dersin.":base.length?"Bu seçime uyan satış yok.":"Henüz satış yok. Bir alımdan satış yaptığında <b>+ Yeni satış</b> ile gir; o modelin stoğu otomatik düşer."}</div></div>`;
+  if(tab==="kon"){
+    h+=`<div class="panel"><div class="tablewrap"><table><thead><tr><th>Gönderim</th><th>Müşteri</th><th>Mallar</th><th class="r">Satıldı</th><th class="r">Bekliyor</th><th class="r">Durum</th></tr></thead><tbody>${list.map(s=>{ const c=SC(s), sold=konsSold(s), back=c.lines.reduce((a,x)=>a+(x.iade||0)+(x.lost||0),0), dd=daysSince(s.date);
+      return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(s.date)}</td><td class="tt">${esc(saleCustomer(s))}</td><td style="white-space:normal;min-width:200px">${esc(saleLinesTxt(s))}</td>
+        <td class="r">${sold>0.5?`${nf0.format(sold)} kg<br><span class="muted" style="font-size:12px">${usdf(c.revUSD)}</span>`:`<span class="muted">—</span>`}</td>
+        <td class="r">${c.pendKg>0.5?`<b>${nf0.format(c.pendKg)} kg</b>`:`<span class="muted">—</span>`}${back>0.5?`<br><span class="muted" style="font-size:12px">${nf0.format(back)} kg geri/kayıp</span>`:""}</td>
+        <td class="r">${c.pendKg>0.5?`<span style="color:${dd>30?"var(--warn)":"var(--muted)"}">${dd} gündür müşteride</span>`:`<span style="color:var(--good)">bitti ✓</span>`}</td></tr>`; }).join("")}</tbody></table></div></div>`;
+    return h;
+  }
+  h+=`<div class="panel"><div class="tablewrap"><table><thead><tr><th>Tarih</th><th>Müşteri</th><th>Pazar</th><th>Mallar</th><th class="r">Tutar</th><th class="r">Kalan alacak</th></tr></thead><tbody>${list.map(s=>{const c=SC(s), k=s.realLater;
+    return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(dateOf(s))}</td><td class="tt">${esc(saleCustomer(s))}${c.olot?` <span class="badge">Ortak</span>`:""}${k?` <span class="badge">Konsinyeden</span>`:""}</td><td>${esc(MK[s.market]||"—")}</td>
+      <td style="white-space:normal;min-width:200px">${esc(k?konsSoldTxt(s):saleLinesTxt(s))}${k&&c.pendKg>0.5?`<br><span class="muted" style="font-size:12px">${nf0.format(c.pendKg)} kg hâlâ konsinyede</span>`:""}</td>
+      <td class="r">${k?usdf(c.revUSD):moneyf(c.tot,s.cur)}${!k&&s.cur==="TL"?`<br><span class="muted" style="font-size:12px">${usdf(c.totUSD)}</span>`:""}</td>
+      <td class="r" style="color:${c.olot?"var(--muted)":c.due>1?"var(--warn)":"var(--good)"}">${c.olot?"Ortak hesabında":c.due>1?usdf(c.due):"Tahsil edildi"}</td></tr>`;}).join("")}</tbody></table></div></div>`;
   return h;
 }
 
 /* --- Cari --- */
 function cariData(){ return CALC.partyBalances(S,{lot:C.lot,sale:C.sale,payUSD:C.payUSD},inFirm); }
 function vCari(){
-  let h=`<div class="vh"><h2>Cari</h2>${canWrite&&db?(S.cari==="mal"?"":S.cari==="bnk"?`<button class="btn" type="button" data-act="trf-new">Transfer</button><button class="btn pri" type="button" data-act="bal-new">Bakiye gir</button>`:S.cari==="mas"?`<button class="btn pri" type="button" data-act="new-exp">+ Masraf</button>`:S.cari==="ted"?`<button class="btn" type="button" data-act="new-party" data-kind="supplier">+ Tedarikçi</button><button class="btn pri" type="button" data-act="new-pay-out">+ Ödeme</button>`:S.cari==="mus"?`<button class="btn" type="button" data-act="new-party" data-kind="customer">+ Müşteri</button><button class="btn pri" type="button" data-act="new-pay-in">+ Tahsilat</button>`:`<button class="btn pri" type="button" data-act="new-pay">+ Ödeme / tahsilat</button>`):""}</div>`;
+  let h=`<div class="vh"><h2>Cari</h2>${canWrite&&db?(S.cari==="mal"?"":S.cari==="bnk"?`<button class="btn" type="button" data-act="trf-new">Transfer</button><button class="btn" type="button" data-act="bal-open">Açılış bakiyeleri</button><button class="btn pri" type="button" data-act="bal-new">Bakiye gir</button>`:S.cari==="mas"?`<button class="btn pri" type="button" data-act="new-exp">+ Masraf</button>`:S.cari==="ted"?`<button class="btn" type="button" data-act="new-party" data-kind="supplier">+ Tedarikçi</button><button class="btn pri" type="button" data-act="new-pay-out">+ Ödeme</button>`:S.cari==="mus"?`<button class="btn" type="button" data-act="new-party" data-kind="customer">+ Müşteri</button><button class="btn pri" type="button" data-act="new-pay-in">+ Tahsilat</button>`:`<button class="btn pri" type="button" data-act="new-pay">+ Ödeme / tahsilat</button>`):""}</div>`;
   h+=`<div class="seg tabseg" role="radiogroup" style="max-width:720px">${[["ted","Tedarikçiler"],["mus","Müşteriler"],["mal","Mal kimde"],["mas","Masraflar"],["hep","Tüm ödemeler"],["bnk","Banka / kasa"]].filter(([k])=>!(GZ("banka")&&k==="bnk")).map(([k,t])=>`<button type="button" role="radio" data-cari="${k}" aria-checked="${S.cari===k}">${t}</button>`).join("")}</div>`;
   if(S.cari==="mas") return h+vMasraf();
   if(S.cari==="bnk"&&!GZ("banka")) return h+vBanka();
@@ -611,7 +632,7 @@ function sLot(id){
   return {title:esc(l.code||"Alım"),body,foot};
 }
 const payRow = p => `<button type="button" class="row" data-pay="${p.id}"><span class="typeic ${p.dir==="out"?"o":"t"}">${p.dir==="out"?"ÖDE":"TAH"}</span><span class="main"><div class="t">${esc(p.kind||(p.dir==="out"?"Ödeme":"Tahsilat"))}</div><div class="sub">${fd(p.date)}${p.bank?" · "+esc(p.bank):p.method?" · "+esc(p.method):""}${docN(p)}</div></span><span class="end"><div class="a">${moneyf(+p.amount||0,p.cur)}</div>${p.cur==="TL"?`<div class="b">${usdf(usd(p.amount,p.cur,p.kur))}</div>`:""}</span></button>`;
-const saleRow = s => { const sc=SC(s); return `<button type="button" class="row" data-sale="${s.id}"><span class="typeic s">SAT</span><span class="main"><div class="t">${esc(saleCustomer(s))} · ${esc(MK[s.market]||"")}</div><div class="sub">${fd(s.date)} · ${esc(saleLinesTxt(s))}</div></span><span class="end"><div class="a">${moneyf(sc.tot,s.cur)}</div><div class="b">${sc.olot?"ortak hesabında":sc.due>1?"kalan "+usdf(sc.due):"tahsil edildi"}</div></span></button>`; };
+const saleRow = s => { const sc=SC(s); const k=s.realLater; return `<button type="button" class="row" data-sale="${s.id}"><span class="typeic ${k?"t":"s"}">${k?"KON":"SAT"}</span><span class="main"><div class="t">${esc(saleCustomer(s))} · ${esc(MK[s.market]||"")}${k?" · konsinye":""}</div><div class="sub">${fd(s.date)} · ${esc(saleLinesTxt(s))}${k?` · ${nf0.format(konsSold(s))} kg satıldı${sc.pendKg>0.5?`, ${nf0.format(sc.pendKg)} kg bekliyor`:""}`:""}</div></span><span class="end"><div class="a">${k?usdf(sc.revUSD):moneyf(sc.tot,s.cur)}</div><div class="b">${sc.olot?"ortak hesabında":sc.due>1?"kalan "+usdf(sc.due):"tahsil edildi"}</div></span></button>`; };
 const expRows = es => es.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(x=>`<button type="button" class="row" data-exp="${x.id}"><span class="typeic m">MSR</span><span class="main"><div class="t">${esc(x.cat||"Masraf")}${x.paidBy==="ortak"?` <span class="badge">ortak ödedi</span>`:x.paidBy==="alici"?` <span class="badge">alıcı ödedi</span>`:""}</div><div class="sub">${fd(x.date)}${x.payee?" · "+esc(x.payee):""}${docN(x)}</div></span><span class="end"><div class="a">${moneyf(+x.amount||0,x.cur)}</div>${x.cur==="TL"?`<div class="b">${usdf(expUSD(x))}</div>`:""}</span></button>`).join("");
 
 /* --- satış detayı --- */
@@ -2153,7 +2174,10 @@ function accMoves(){
   return {m,none};
 }
 function accounts(f=BANK_FIRM){
-  const {m,none:none0}=accMoves(); const H=HES(); const keys=new Set([...m.map(x=>x.acc),...Object.keys(H).filter(k=>(H[k]||[]).length)].filter(k=>accFirm(k)===f)); const none=none0.filter(x=>x.firm===f);
+  const {m,none:none0}=accMoves(); const H=HES(); const keys=new Set([...m.map(x=>x.acc),...Object.keys(H).filter(k=>(H[k]||[]).length)].filter(k=>accFirm(k)===f));
+  // bakiye girilmeden önceki hesapsız kayıtlar bakiyeyi etkilemez; sadece ilk bakiye tarihinden sonrakiler uyarılır
+  const firstCp=Object.entries(H).filter(([k,v])=>accFirm(k)===f&&(v||[]).length).map(([,v])=>v.map(c=>String(c.date)).sort()[0]).sort()[0]||"";
+  const none=none0.filter(x=>x.firm===f&&String(x.date)>firstCp);
   const out=[...keys].map(k=>{ const cps=(H[k]||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.at).localeCompare(String(b.at))); const cp=cps[cps.length-1]||null;
     const mv=m.filter(x=>x.acc===k).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
     const after=cp?mv.filter(x=>String(x.date)>String(cp.date)):mv; const bal=(cp?+cp.amt:0)+sum(after,x=>x.amt);
@@ -2163,7 +2187,7 @@ function accounts(f=BANK_FIRM){
 function vBanka(){
   const block=f=>{ const {list,none}=accounts(f); const cur=c=>c.k.endsWith("|TL")?"TL":"USD";
     let h=`<h3 class="acch">${f==="x"?"Elden kasa (firmasız)":esc(firmName(f))+" hesapları"}</h3>`;
-    if(!list.length) h+=`<div class="panel"><div class="empty">${f==="x"?"Elden kasada hareket yok. Elden alım-satımların ödeme ve tahsilatları buraya kendiliğinden işlenir; istersen “Bakiye gir” ile elindeki nakdi yaz.":"Henüz hesap yok. “Bakiye gir” ile her bankadaki (ve kasadaki) bugünkü parayı bir kere yaz; sonrasını sistem ödeme ve tahsilatlardan kendisi hesaplar."}</div></div>`;
+    if(!list.length) h+=`<div class="panel"><div class="empty">${f==="x"?"Elden kasada hareket yok. Elden alım-satımların ödeme ve tahsilatları buraya kendiliğinden işlenir; istersen “Bakiye gir” ile elindeki nakdi yaz.":"Henüz hesap yok. Üstteki <b>Açılış bakiyeleri</b> ile bütün hesapların parasını bir kere yaz; sonrasını sistem ödeme, tahsilat, masraf ve transferlerden kendisi hesaplar."}</div></div>`;
     else h+=`<div class="accs">${list.map(a=>`<button type="button" class="acc" data-act="acct-open" data-k="${esc(a.k)}"><div class="an">${esc(plainAcc(a.k.split("|")[0]))}<span class="muted"> · ${cur(a)==="TL"?"TL":"USD"}</span></div><div class="ab ${a.bal<0?"bad":""}">${moneyf(a.bal,cur(a))}</div><div class="as muted">${a.cp?`Son kontrol ${fd(a.cp.date)}${a.after.length?` · sonra ${a.after.length} hareket`:""}`:`<span style="color:var(--warn)">Başlangıç bakiyesi girilmedi</span>`}</div></button>`).join("")}</div>`;
     if(none.length) h+=`<div class="fnote" style="margin-top:12px">${none.length} ödeme / tahsilat / masrafta hesap seçilmemiş; bakiyelere girmedi. Açıp “Düzenle” ile hesabını seç: ${none.slice(0,5).map(x=>`<button type="button" class="linkbtn" ${x.attr}>${fd(x.date)} ${esc(x.t)}</button>`).join(", ")}${none.length>5?" …":""}</div>`;
     return h; };
@@ -2186,6 +2210,28 @@ function sAcct(t){
 }
 const accFirmSeg = k => ({k,label:"Firma",type:"seg",options:[["a",firmName("a")],["b",firmName("b")]],showIf:x=>![x.bank,x.fbank,x.tbank].includes(ELDEN_KASA)});
 const defAccFirm = k => k?accFirm(k):S.firm==="b"?"b":"a";
+/* ilk kez (ya da toplu) bakiye girişi: bir firmanın bütün hesapları tek ekranda, aynı gün sonu */
+function openingForm(){
+  const banks=[KASA,...lists("banks").filter(b=>b!==KASA&&key(b)!=="nakit")];
+  const y=new Date(Date.parse(today())-864e5).toISOString().slice(0,10);
+  const v={firm:S.firm==="b"?"b":S.firm==="x"?"x":"a",date:y};
+  openForm({title:"Açılış bakiyeleri",values:v,fields:[
+    {k:"n",type:"note",text:"Her hesaptaki parayı yaz; boş bıraktığın hesap girilmez. <b>Tarih</b>: yazdığın para hangi günün sonundaki para? Sabah, o günün hareketleri başlamadan giriyorsan <b>dünü</b> seç; o tarihten sonraki ödeme, tahsilat ve masraflar bakiyeye kendiliğinden eklenir."},
+    {k:"firm",label:"Firma",type:"seg",options:[["a",firmName("a")],["b",firmName("b")],["x","Elden kasa"]]},
+    {k:"date",label:"Hangi günün sonu",type:"date",req:true},
+    ...banks.flatMap((b,i)=>[{k:"u_"+i,label:`${b} · USD $`,type:"num",half:true,showIf:x=>x.firm!=="x"},{k:"t_"+i,label:`${b} · TL ₺`,type:"num",half:true,showIf:x=>x.firm!=="x"}]),
+    {k:"xu",label:"Elden kasa · USD $",type:"num",half:true,showIf:x=>x.firm==="x"},{k:"xt",label:"Elden kasa · TL ₺",type:"num",half:true,showIf:x=>x.firm==="x"},
+    {k:"nb",label:"Listede olmayan hesap (adı)",half:true,showIf:x=>x.firm!=="x",ph:"Ör. Ziraat Bankası USD"},{k:"nu",label:"O hesap · USD $",type:"num",half:true,showIf:x=>x.firm!=="x"&&!!x.nb},{k:"nt",label:"O hesap · TL ₺",type:"num",half:true,showIf:x=>x.firm!=="x"&&!!x.nb},
+  ],onSave:async x=>{
+    const H={...HES()}, at=new Date().toISOString(); let n=0;
+    const put=(bank,cur,amt)=>{ if(amt==null||Number.isNaN(amt)) return; const kk=accKey(bank,cur,x.firm); H[kk]=[...(H[kk]||[]),{date:x.date,amt,note:"Açılış bakiyesi",at,by:me||null}]; n++; };
+    if(x.firm==="x"){ put(ELDEN_KASA,"USD",x.xu); put(ELDEN_KASA,"TL",x.xt); }
+    else { banks.forEach((b,i)=>{ put(b,"USD",x["u_"+i]); put(b,"TL",x["t_"+i]); });
+      if(x.nb){ const nb=x.nb.trim(); if(!lists("banks").some(b=>key(b)===key(nb))){ if(S.lists.banks?.items?.length) await db.doc("lists/banks").update({items:OP.push(nb)}); else await db.doc("lists/banks").set({items:[...lists("banks"),nb]}); } put(nb,"USD",x.nu); put(nb,"TL",x.nt); } }
+    if(!n) return "En az bir hesabın parasını yaz.";
+    await db.doc("settings/hesaplar").set({...(S.settings.hesaplar||{}),bal:H}); toast(`${n} hesabın bakiyesi girildi`);
+  }});
+}
 function balForm(k){
   const [b,c]=k?k.split("|"):[S.firm==="x"?ELDEN_KASA:"","USD"];
   openForm({title:"Gerçek bakiyeyi gir",values:{bank:plainAcc(b),cur:c||"USD",date:today(),firm:defAccFirm(k)},fields:[
@@ -2907,6 +2953,8 @@ document.addEventListener("click",e=>{
         t.disabled=true; try{ await window.__mfa.verify(top.enr.id,code); top.enr=null; top.list=null; toast("İki adımlı giriş açıldı"); mfaLoad(top); }catch(e){ t.disabled=false; toast(/invalid|expired|code/i.test(e?.message||"")?"Kod yanlış; uygulamadaki güncel kodu yaz.":(e?.message||"Doğrulanamadı")); } },
       "mfa-off":()=>armDel(t,async()=>{ await window.__mfa.remove(t.dataset.id); const top=S.stack[S.stack.length-1]; top.list=null; mfaLoad(top); }),
       "q-flush":()=>{ window.__queue?.flush().then(netBar); },
+      "bal-open":()=>openingForm(),
+      "sat-tab":()=>{ S.satv=d.k; S.market="all"; render(); },
       "hist-all":()=>{ openSheet({type:"hist"}); loadHist(S.stack[S.stack.length-1]); },
       "hist-tab":()=>{ const top=S.stack[S.stack.length-1]; top.only=d.only; top.rows=null; renderSheet(); loadHist(top); },
       "hist-restore":()=>histRestore(t),
