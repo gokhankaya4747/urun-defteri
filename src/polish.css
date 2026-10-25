@@ -146,3 +146,15 @@ tfoot td{background:var(--surface-2)}
 .lline .sub{white-space:normal}
 .lline .sub .linkbtn{font:inherit;color:inherit;text-decoration:underline dotted;text-underline-offset:2px;background:none;border:0;padding:0;cursor:pointer}
 .lline .rschips{margin-top:6px}
+/* kâr raporu */
+.rpsel{border:1px solid var(--line-2);background:var(--surface);border-radius:var(--r-sm);padding:0 12px;height:38px;font-weight:500;min-width:160px}
+.money.rpm .v small{font-size:13px;font-weight:500}
+@media (max-width:640px){ .money.rpm{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.rpp{margin-bottom:10px}
+.rpp .rph{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.rpp .rph b{font-size:16px}
+.rpp .rph span{color:var(--good);font-weight:600;font-variant-numeric:tabular-nums}
+.rpmon .main{display:flex;flex-direction:column;gap:6px}
+.rpbar{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden;max-width:420px}
+.rpbar i{display:block;height:100%;border-radius:3px}
+@media (max-width:820px){ .bottom button{font-size:10.5px} }

@@ -186,3 +186,7 @@ button.trk{font-family:inherit;cursor:pointer}
 :root[data-theme="dark"]{--firm-x:#C9A97A}
 .acch{font:700 15px/1.2 var(--f-disp);letter-spacing:.04em;text-transform:uppercase;margin:18px 0 8px}
 .acch:first-of-type{margin-top:4px}
+.irow.sale{grid-template-areas:"a a x" "k f ." "h h h"}
+.irow .c-h{grid-area:h;font-size:12px;color:var(--muted)}
+.irow .c-h:empty{display:none}
+.irow .c-h.bad{color:var(--bad);font-weight:600}
