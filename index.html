@@ -417,6 +417,23 @@ button.trk{font-family:inherit;cursor:pointer}
 .stk i{width:7px;height:7px;border-radius:50%;background:var(--c)}
 .stk b{font-weight:600}
 @media (max-width:520px){.mrow2{grid-template-columns:1fr}.mrow2 .ms{grid-column:1}}
+/* Irak satışı bölümleri */
+.isec{display:flex;flex-direction:column;gap:8px}
+.isec .ih{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.isec .ih h4{margin:0 auto 0 0;font:700 15px/1.2 var(--f-disp);letter-spacing:.04em;text-transform:uppercase}
+.isec .num{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font:700 12px/1 var(--f-body)}
+.isec .ihint{margin:0;font-size:12.5px;color:var(--muted)}
+.ledger{width:100%}
+.ledger td{padding:9px 14px}
+.ledger tfoot td{font-weight:700;border-top:1px solid var(--line)}
+.typeic.kap{background:color-mix(in srgb,var(--st-irak) 18%,var(--surface));color:var(--st-irak)}
+.kaprow .end{text-align:right}
+.kaprow{flex-wrap:wrap}
+.kaprow .main{min-width:0;flex:1 1 60%}
+.kaprow .main .t,.kaprow .main .sub{white-space:normal;overflow:visible;text-overflow:clip}
+.kaprow .kbtns{flex-basis:100%;display:flex;gap:6px;justify-content:flex-end}
+.rsline .main .t{white-space:normal}
+.rschips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 /* giriş ekranı */
 .authwrap{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px 16px;overflow-y:auto}
 .authcard{width:min(420px,100%);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px 22px;display:flex;flex-direction:column;gap:14px}
@@ -456,5 +473,5 @@ button.trk{font-family:inherit;cursor:pointer}
 <script src="supabase.js"></script>
 <script src="config.js?v=a7e2af8e99"></script>
 <script src="runtime.js?v=ba6344d64a"></script>
-<script src="app.js?v=1bba5d0a10"></script>
+<script src="app.js?v=12a8aad9e5"></script>
 </body></html>
