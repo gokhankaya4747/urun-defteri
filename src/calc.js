@@ -166,12 +166,24 @@ const CALC = (() => {
     for (const [k, v] of cusIn) { const [pid, firm] = k.split("|"); const open = sales.filter((s) => s.firmId === firm && (s.customerId || "n:" + key(s.customer)) === pid && !sale.get(s.id).olot).sort((a, b) => String(a.date).localeCompare(String(b.date))).map((s) => ({ r: sale.get(s.id) })); const left = fifo(open, v); if (left > 0.5) unalloc.set("c|" + k, left); }
     for (const [k, v] of supOut) { const [pid, firm] = k.split("|"); const open = lots.filter((l) => l.firmId === firm && (l.supplierId || "n:" + key(l.supplier)) === pid).sort((a, b) => String(a.orderDate || "").localeCompare(String(b.orderDate || ""))).map((l) => ({ r: lot.get(l.id) })); const left = fifo(open, v); if (left > 0.5) unalloc.set("s|" + k, left); }
 
+    // 5b) elden işler: birine alım-satım için verilen para. Satılınca kâr = satış − sermaye − masraf; bizim payımız share.
+    //     O kişinin bize borcu = sermaye + (satıldıysa) kâr payımız − geri dönen para.
+    const is = new Map();
+    for (const j of (D.isler || [])) {
+      const sermaye = sum(j.ver || [], (x) => usd(x.amount, x.cur, x.kur)), back = sum(j.don || [], (x) => usd(x.amount, x.cur, x.kur));
+      const kg = sum(j.items || [], (it) => +it.kg || 0), sold = !!j.satis, sh = (+j.share || 0) / 100;
+      const rev = sold ? (j.items || []).reduce((a, it, i) => a + (+it.kg || 0) * (+(j.satis.ppk || [])[i] || 0), 0) : 0, masraf = sold ? +j.satis.masraf || 0 : 0;
+      const profit = sold ? rev - sermaye - masraf : 0, ourProfit = profit * sh, owe = sermaye + ourProfit;
+      if (sold) ev({ kind: "is", date: j.satis.date, firm: j.firmId, isId: j.id, rev, cogs: sermaye, exp: masraf, share: sh, kg, rec: j });
+      is.set(j.id, { sermaye, back, kg, sold, sh, rev, masraf, profit, ourProfit, owe, due: owe - back, buyPpk: kg ? sermaye / kg : 0, sellPpk: sold && kg ? rev / kg : 0 });
+    }
+
     // 6) son maliyet / kg: şu ana kadarki tüm masraflar ve kur farkı dahil, fire ve iade düşülmüş kg başına
     for (const ci of item.values()) {
       const net = ci.kgIn - ci.adjKg - ci.supRetKg - (ci.lostKg || 0); // satılabilir kg: fire, tedarikçiye iade ve konsinyede kaybolan düşülür
       ci.finalCost = net > 0 ? (ci.kgIn * landedOf(ci) + (ci.sevkExp || 0) - (ci.credAmt || 0) + ci.saleExp - ci.saleKur) / net : landedOf(ci);
     }
-    return { item, lot, sale, events, unalloc, payUSD };
+    return { item, lot, sale, is, events, unalloc, payUSD };
   }
 
   /* cari bakiyeler (firma süzgeci dışarıdan): tedarikçi = alış − indirim − ödenen; müşteri = gerçek satış + ona verilen − yerimize ödediği − tahsil + ortak hesap */
@@ -183,6 +195,8 @@ const CALC = (() => {
     for (const [id, p] of Object.entries(parties)) g(p.kind === "supplier" ? sup : cus, "i:" + id, p.name, id);
     for (const l of D.lots.filter(inFirm)) { const c = R.lot.get(l.id); const r = g(sup, pk(l.supplierId, l.supplier), parties[l.supplierId]?.name || l.supplier, l.supplierId); r.a += c.costUSD - c.cred; r.n++;
       if (l.ortak?.on) { const o = g(cus, pk(l.ortak.partnerId, ""), parties[l.ortak.partnerId]?.name || "", l.ortak.partnerId); o.a += c.owe || 0; o.n++; } }
+    for (const j of (D.isler || []).filter(inFirm)) { const c = R.is?.get(j.id); if (!c) continue; const r = g(cus, pk(j.partyId, j.party), parties[j.partyId]?.name || j.party, j.partyId); r.a += c.owe; r.p += c.back; r.n++;
+      for (const x of (j.don || [])) if ((x.date || "") > r.last) r.last = x.date; }
     for (const s of D.sales.filter(inFirm)) { const c = R.sale.get(s.id); if (c.olot) continue; const r = g(cus, pk(s.customerId, s.customer), parties[s.customerId]?.name || s.customer, s.customerId); r.a += c.revUSD + (c.kapLeft || 0); r.p += c.buyerExp; r.n++; }
     const pv = R.payUSD || ((p) => usd(p.amount, p.cur, p.kur));
     for (const p of D.pays.filter(inFirm)) { const isCus = parties[p.partyId]?.kind === "customer", v = pv(p);
@@ -247,15 +261,19 @@ const CALC = (() => {
         "Resmi gelen USD": r2(kc.inn), "Durum": kc.wait ? (kc.part ? "Kısmen geldi" : "Resmi havale bekleniyor") : "Tamam",
         "Kur farkı kârı USD": kc.wait ? "" : r2(kc.kur), "Alıcıda kalan dinar": kc.wait || !kc.rates ? "" : Math.round(kc.leftDinar), "Alıcıda kalan USD (masraflar için)": kc.wait ? "" : r2(kc.left),
         "Havaleler": (k.ins || []).map((x) => `${x.date} ${x.amt}$ ${String(x.bank || "").split("|")[0].replace(/^b:/, "")}`).join(", "), "Not": k.note || "" }; });
+    out["Elden işler"] = (D.isler || []).filter(inFirm).slice().sort(byDate).map((j) => { const c = R.is.get(j.id);
+      return { "Tarih": j.date, "Firma": H.firm(j.firmId), "Kişi": H.party(j.partyId, j.party), "Mallar": (j.items || []).map((it) => `${lbl(it)} ${Math.round(+it.kg || 0)} kg`).join(", "), "Verilen USD": r2(c.sermaye),
+        "Durum": c.sold ? `Satıldı ${j.satis.date}` : "Satılmadı", "Satış USD": c.sold ? r2(c.rev) : "", "Masraf USD": c.sold ? r2(c.masraf) : "", "Kâr USD": c.sold ? r2(c.profit) : "", "Kâr payımız": `%${+j.share || 0}`,
+        "Bizim kâr USD": c.sold ? r2(c.ourProfit) : "", "Dönmesi gereken USD": r2(c.owe), "Dönen USD": r2(c.back), "Kalan USD": r2(c.due), "Not": j.note || "" }; });
     out["Fire, iade, kayıp"] = [
       ...lots.flatMap((l) => (l.adj || []).map((a) => { const ci = R.item.get(l.id + "|" + a.ik); return { "Tarih": a.date, "Tür": "Fire / stok düzeltme", "Alım": l.code, "Firma": H.firm(l.firmId), "Ürün": lbl(ci?.it), "kg": +a.kg || 0, "Tutar USD": ci ? r2((+a.kg || 0) * (a.loc === "irak" ? landedIrakOf(ci) : landedOf(ci))) : "", "Not": a.note || a.reason || "" }; })),
       ...lots.flatMap((l) => (l.cred || []).map((r) => ({ "Tarih": r.date, "Tür": +r.kg > 0 ? "Tedarikçiye mal iadesi" : "Tedarikçi indirimi", "Alım": l.code, "Firma": H.firm(l.firmId), "Ürün": +r.kg > 0 ? lbl(l.items.find((i) => i.k === r.ik)) : "", "kg": +r.kg || "", "Tutar USD": r2(usd(r.amount, r.cur, r.kur)), "Not": r.note || "" }))),
       ...sales.flatMap((s) => (s.ret || []).map((r) => { const L = R.sale.get(s.id).lines[r.i]; return { "Tarih": r.date, "Tür": r.kind === "kayip" ? "Konsinyede kayıp" : s.realLater ? "Konsinyeden geri geldi" : "Müşteri iadesi", "Alım": L?.ci?.lot.code || "", "Firma": H.firm(s.firmId), "Ürün": lbl(L?.ci?.it), "kg": +r.kg || 0, "Tutar USD": L?.ci ? r2((+r.kg || 0) * (r.kind === "kayip" ? (L.ln.loc === "irak" ? landedIrakOf(L.ci) : landedOf(L.ci)) : usd(+L.ln.ppk || 0, s.cur, s.kur))) : "", "Not": `${cust(s)}${r.note ? " · " + r.note : ""}` }; })),
     ].sort(byDate);
     out["Irak sevkleri"] = lots.flatMap((l) => (l.sevk || []).map((sv) => ({ "Tarih": sv.date, "Alım": l.code, "Firma": H.firm(l.firmId), "Ürünler": (sv.lines || []).map((z) => `${lbl(l.items.find((i) => i.k === z.ik))} ${Math.round(+z.kg || 0)} kg`).join(", "), "Toplam kg": sum(sv.lines || [], (z) => +z.kg || 0), "Nakliye firması": sv.trucker || "", "TIR plakası": (sv.plates || []).join(", "), "Not": sv.note || "" }))).sort(byDate);
-    const KT = { fx: "TL kur farkı", sale: "Satış", ret: "İade", lost: "Kayıp", sexp: "Satış masrafı", kap: "Kapama kur farkı", fire: "Fire", supret: "Tedarikçiye iade", ovh: "Genel gider" };
+    const KT = { is: "Elden iş", fx: "TL kur farkı", sale: "Satış", ret: "İade", lost: "Kayıp", sexp: "Satış masrafı", kap: "Kapama kur farkı", fire: "Fire", supret: "Tedarikçiye iade", ovh: "Genel gider" };
     out["Kâr hareketleri"] = R.events.filter((e) => inFirm({ firmId: e.firm })).slice().sort(byDate).map((e) => { const full = (e.rev || 0) - (e.cogs || 0) - (e.exp || 0) + (e.kur || 0) - (e.kes || 0) - (e.loss || 0), sh = e.kind === "ovh" ? 1 : e.share ?? 1;
-      return { "Tarih": e.date || "", "Hareket": KT[e.kind] || e.kind, "Firma": H.firm(e.firm), "Alım": e.ci?.lot.code || "", "Ürün": e.ci ? lbl(e.ci.it) : "", "Müşteri": e.saleId && saleOf.get(e.saleId) ? cust(saleOf.get(e.saleId)) : "", "kg": e.kg ? r2(e.kg) : "",
+      return { "Tarih": e.date || "", "Hareket": KT[e.kind] || e.kind, "Firma": H.firm(e.firm), "Alım": e.ci?.lot.code || "", "Ürün": e.ci ? lbl(e.ci.it) : e.kind === "is" ? (e.rec.items || []).map(lbl).join(", ") : "", "Müşteri": e.saleId && saleOf.get(e.saleId) ? cust(saleOf.get(e.saleId)) : e.kind === "is" ? H.party(e.rec.partyId, e.rec.party) : "", "kg": e.kg ? r2(e.kg) : "",
         "Gelir USD": r2(e.rev), "Malın maliyeti USD": r2(e.cogs), "Masraf USD": r2(e.exp), "Kur farkı USD": r2(e.kur), "Kesinti USD": r2(e.kes), "Fire / kayıp USD": r2(e.loss), "Kâr USD": r2(full), "Kâr payımız": sh < 1 ? `%${Math.round(sh * 100)}` : "", "Bizim kâr USD": r2(full * sh) }; });
     const PB = partyBalances(D, R, inFirm);
     out["Cari tedarikçi"] = PB.sup.filter((r) => r.a || r.p).map((r) => ({ "Tedarikçi": r.name, "Alış (iade/indirim düşülmüş) USD": r2(r.a), "Ödenen USD": r2(r.p), "Bakiye USD": r2(r.a - r.p), "Son ödeme": r.last || "" }));

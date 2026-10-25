@@ -167,6 +167,20 @@ T("maliyet dökümü = son maliyet (alış + masraflar + navlun + satış masraf
   assert.ok(b.lines.some((x) => x.group === "kur" && x.total < 0), "kur farkı kârı maliyeti düşürür");
 });
 
+T("elden iş: verilen sermaye + kâr payımız döner; kâr satılınca yazılır", () => {
+  const D = base(); D.parties["p9"] = { kind: "customer", name: "Ahmet" };
+  D.isler = [{ id: "j1", firmId: "x", partyId: "p9", date: "2026-10-01", share: 50, ver: [{ id: "v1", date: "2026-10-01", amount: 20000, cur: "USD" }], items: [{ k: "i1", productId: "findik", model: "", kg: 4000 }] }];
+  let R = CALC.compute(D), c = R.is.get("j1");
+  near(c.due, 20000, "satılmadan önce: verilen para kişide"); assert.equal(R.events.filter((e) => e.kind === "is").length, 0);
+  D.isler[0].satis = { date: "2026-10-20", ppk: [5.75], masraf: 500 }; D.isler[0].don = [{ id: "d1", date: "2026-10-21", amount: 10000, cur: "USD" }];
+  R = CALC.compute(D); c = R.is.get("j1");
+  near(c.profit, 4000 * 5.75 - 20000 - 500, "kâr = satış − sermaye − masraf");
+  near(c.ourProfit, (4000 * 5.75 - 20500) * 0.5, "bizim pay %50");
+  near(c.due, 20000 + c.ourProfit - 10000, "kalan = sermaye + payımız − dönen");
+  const ev = R.events.find((e) => e.kind === "is"); near((ev.rev - ev.cogs - ev.exp) * ev.share, c.ourProfit, "Rapor olayı");
+  const PB = CALC.partyBalances(D, R, () => true); const p = PB.cus.find((r) => r.id === "p9"); near(p.a - p.p, c.due, "cari");
+});
+
 T("Excel sayfaları = olaylar (Kâr hareketleri toplamı)", () => {
   const D = base(), R = CALC.compute(D);
   const SH = CALC.sheets(D, R, { firm: (x) => x, party: (i, f) => f || i, prod: (it) => it.productId, stage: (l) => l.status });
