@@ -146,15 +146,16 @@ function model(rows: { col: string; id: string; data: any }[]) {
   for (const s of sales) {
     let tot = 0, kg = 0, rev = 0, olot: any = null; const lines: any[] = [];
     s.items.forEach((ln: any, i: number) => { const amt = (+ln.kg || 0) * (+ln.ppk || 0); tot += amt; kg += +ln.kg || 0; const ci = items.get(ln.lotId + "|" + ln.ik); if (ci) { ci.sold += +ln.kg || 0; if (ln.loc === "irak") ci.soldIrak += +ln.kg || 0; if (ci.lot.ortak?.on) olot = ci.lot; }
-      let realAmt = amt; if (s.realLater) { const rs = (s.real || []).flatMap((r: any) => (r.lines || []).filter((x: any) => x.i === i)); const rk = sum(rs, (x: any) => +x.kg || 0); realAmt = sum(rs, (x: any) => (+x.kg || 0) * (+x.ppk || 0)) + Math.max(0, (+ln.kg || 0) - rk) * (+ln.ppk || 0); }
-      rev += realAmt; lines.push({ ln, ci, amtUSD: usd(realAmt, s.cur, s.kur) }); });
+      // konsinye: yalnız gerçekten satılan kısım gelir/maliyet; bekleyen mal müşteride bizim stoğumuz
+      let realAmt = amt, soldKg = +ln.kg || 0; if (s.realLater) { const rs = (s.real || []).flatMap((r: any) => (r.lines || []).filter((x: any) => x.i === i)); soldKg = sum(rs, (x: any) => +x.kg || 0); realAmt = sum(rs, (x: any) => (+x.kg || 0) * (+x.ppk || 0)); }
+      rev += realAmt; lines.push({ ln, ci, soldKg, amtUSD: usd(realAmt, s.cur, s.kur) }); });
     const totUSD = usd(tot, s.cur, s.kur), revUSD = usd(rev, s.cur, s.kur);
     const got = sum(pays.filter((p: any) => p.dir === "in" && p.saleId === s.id), (p: any) => usd(p.amount, p.cur, p.kur));
     const gave = sum(pays.filter((p: any) => p.dir === "out" && p.saleId === s.id), (p: any) => usd(p.amount, p.cur, p.kur));
     const buyerExp = sum(exps.filter((x: any) => x.saleId === s.id && x.paidBy === "alici"), (x: any) => usd(x.amount, x.cur, x.kur));
     const e = eSale.get(s.id) || { us: 0, p: 0 }; const gain = kapGain(kaps.filter((k: any) => k.saleId === s.id));
     saleC.set(s.id, { totUSD, revUSD, got, gave, buyerExp, gain, due: revUSD - buyerExp + gave - got, olot });
-    for (const { ln, ci, amtUSD } of lines) { if (!ci) continue; const a: any = acc.get(ci.lot.id); const k = +ln.kg || 0, sh = kg ? k / kg : 0; a.soldKg += k; a.soldCost += k * ci.cu; a.rev += amtUSD; a.expUs += e.us * sh; a.expP += e.p * sh; a.kur = (a.kur || 0) + gain * sh; if ((s.date || "") > a.lastSale) a.lastSale = s.date; }
+    for (const { ln, ci, amtUSD, soldKg } of lines) { if (!ci) continue; const a: any = acc.get(ci.lot.id); const sh = kg ? (+ln.kg || 0) / kg : 0; a.soldKg += soldKg; a.soldCost += soldKg * ci.cu; a.rev += amtUSD; a.expUs += e.us * sh; a.expP += e.p * sh; a.kur = (a.kur || 0) + gain * sh; if ((s.date || "") > a.lastSale) a.lastSale = s.date; }
   }
   const lotC = new Map<string, any>();
   for (const l of lots) {

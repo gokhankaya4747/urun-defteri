@@ -155,7 +155,7 @@ function normSale(s){
 /* ---------- hesaplar ---------- */
 function calcAll(){
   C.item.clear(); C.lot.clear(); C.sale.clear();
-  for(const l of S.lots) for(const it of l.items) C.item.set(l.id+"|"+it.k,{lot:l,it,soldKg:0,irakIn:0,soldIrak:0,adjKg:0,adjIrak:0,cu:usd(+it.ppk||0,l.cur,l.kur)});
+  for(const l of S.lots) for(const it of l.items) C.item.set(l.id+"|"+it.k,{lot:l,it,soldKg:0,konsKg:0,irakIn:0,soldIrak:0,adjKg:0,adjIrak:0,cu:usd(+it.ppk||0,l.cur,l.kur)});
   for(const l of S.lots) for(const a of (l.adj||[])){ const ci=C.item.get(l.id+"|"+a.ik); if(!ci) continue; ci.adjKg+=+a.kg||0; if(a.loc==="irak") ci.adjIrak+=+a.kg||0; }
   for(const l of S.lots) for(const sv of (l.sevk||[])) for(const ln of (sv.lines||[])){ const ci=C.item.get(l.id+"|"+ln.ik); if(ci) ci.irakIn+=+ln.kg||0; }
   const eSale=new Map(), eLot=new Map();
@@ -169,10 +169,10 @@ function calcAll(){
   for(const s of S.sales){
     let tot=0, kg=0, olot=null, rev=0, pendKg=0; const lines=[];
     s.items.forEach((ln,i)=>{ const amt=(+ln.kg||0)*(+ln.ppk||0); tot+=amt; kg+=+ln.kg||0; const ci=C.item.get(ln.lotId+"|"+ln.ik); if(ci){ ci.soldKg+=+ln.kg||0; if(ln.loc==="irak") ci.soldIrak+=+ln.kg||0; if(ci.lot.ortak?.on) olot=ci.lot; }
-      // fiyatı sonra belli olacak satış: gerçekleşen kısım gerçek fiyattan, bekleyen kısım fatura fiyatından (tahmini)
-      let realAmt=amt, soldKg=+ln.kg||0, realKg=0;
-      if(s.realLater){ const rs=(s.real||[]).flatMap(r=>(r.lines||[]).filter(x=>x.i===i)); realKg=sum(rs,x=>+x.kg||0); const pend=Math.max(0,(+ln.kg||0)-realKg); pendKg+=pend; realAmt=sum(rs,x=>(+x.kg||0)*(+x.ppk||0))+pend*(+ln.ppk||0); }
-      rev+=realAmt; lines.push({ln,i,ci,amtUSD:usd(realAmt,s.cur,s.kur),offUSD:usd(amt,s.cur,s.kur),realKg,soldKg}); });
+      // konsinye: mal satılana kadar bizim malımız (müşteride bekliyor). Gelir ve maliyet sadece gerçekten satılan kısımdan; tahmin yok.
+      let realAmt=amt, soldKg=+ln.kg||0, realKg=0, pend=0;
+      if(s.realLater){ const rs=(s.real||[]).flatMap(r=>(r.lines||[]).filter(x=>x.i===i)); realKg=sum(rs,x=>+x.kg||0); pend=Math.max(0,(+ln.kg||0)-realKg); pendKg+=pend; realAmt=sum(rs,x=>(+x.kg||0)*(+x.ppk||0)); soldKg=realKg; if(ci) ci.konsKg=(ci.konsKg||0)+pend; }
+      rev+=realAmt; lines.push({ln,i,ci,amtUSD:usd(realAmt,s.cur,s.kur),offUSD:usd(amt,s.cur,s.kur),realKg,soldKg,pend}); });
     const totUSD=usd(tot,s.cur,s.kur), revUSD=usd(rev,s.cur,s.kur);
     const pays=S.pays.filter(p=>p.dir==="in"&&p.saleId===s.id); const got=sum(pays,p=>usd(p.amount,p.cur,p.kur));
     const outs=S.pays.filter(p=>p.dir==="out"&&p.saleId===s.id); const gave=sum(outs,p=>usd(p.amount,p.cur,p.kur));
@@ -183,8 +183,8 @@ function calcAll(){
     const cashGot=sum(pays.filter(p=>isCashPay(p)),p=>usd(p.amount,p.cur,p.kur));
     const due=revUSD-buyerExp+gave-got, offPaid=got-cashGot+kp.inn;
     C.sale.set(s.id,{tot,totUSD,revUSD,est:s.realLater&&pendKg>0.5,pendKg,kg,got,gave,outs,buyerExp,due,offPaid,offDue:totUSD-offPaid,kap:kp,pays,exps:e.list,exp:e.us+e.p,olot,lines});
-    for(const {ln,ci,amtUSD} of lines){ if(!ci) continue; const a=acc.get(ci.lot.id); const k=+ln.kg||0, sh=kg?k/kg:0;
-      a.soldKg+=k; a.soldCost+=k*ci.cu; a.rev+=amtUSD; a.expUs+=e.us*sh; a.expP+=e.p*sh; a.kur+=kp.gain*sh; if(!a.sales.includes(s)) a.sales.push(s); }
+    for(const {ln,ci,amtUSD,soldKg} of lines){ if(!ci) continue; const a=acc.get(ci.lot.id); const sh=kg?(+ln.kg||0)/kg:0;
+      a.soldKg+=soldKg; a.soldCost+=soldKg*ci.cu; a.rev+=amtUSD; a.expUs+=e.us*sh; a.expP+=e.p*sh; a.kur+=kp.gain*sh; if(!a.sales.includes(s)) a.sales.push(s); }
   }
   for(const l of S.lots){
     const cost=sum(l.items,it=>(+it.kg||0)*(+it.ppk||0)), costUSD=usd(cost,l.cur,l.kur);
@@ -197,7 +197,7 @@ function calcAll(){
     // kg başına gerçek maliyet: alış + alıma bağlı masraflar − alımın kur farkı, fire düşülmüş kg'ya bölünür
     const kgIn=sum(l.items,it=>+it.kg||0), kgNet=kgIn-sum(l.items,it=>C.item.get(l.id+"|"+it.k)?.adjKg||0);
     const perKg=kgNet>0?(e.us+e.p-kpl.gain)/kgNet:0, fireK=kgNet>0?kgIn/kgNet:1;
-    for(const it of l.items){ const ci=C.item.get(l.id+"|"+it.k); if(ci) ci.landed=ci.cu*fireK+perKg; }
+    for(const it of l.items){ const ci=C.item.get(l.id+"|"+it.k); if(ci){ ci.landed=ci.cu*fireK+perKg; ci.perKg=perKg; ci.fireK=fireK; } }
     const r={cost,costUSD,paid,due:costUSD-paid,pays,sales:a.sales,exps:e.list,soldKg:a.soldKg,soldCost:a.soldCost,rev:a.rev,expUs,expP,exp:expUs+expP,kur,kap:kpl,loss,perKg,profit,pct:costUSD?Math.max(0,Math.min(1,paid/costUSD)):0};
     if(l.ortak?.on){ const sh=(+l.ortak.share||0)/100; const op=S.pays.filter(p=>p.dir==="in"&&p.lotId===l.id); const og=sum(op,p=>usd(p.amount,p.cur,p.kur));
       const owe=a.rev-expP-(1-sh)*profit; Object.assign(r,{share:sh,ourProfit:sh*profit,owe,ogot:og,odue:owe-og,opays:op}); }
@@ -228,16 +228,17 @@ const saleHasProd = (s,pid) => s.items.some(ln=>{ const ci=C.item.get(ln.lotId+"
 /* ürün → model istatistikleri (yalnızca o ürünün kendi içinde) */
 function prodStats(pid){
   const m=new Map(); const yr=today().slice(0,4);
-  const g=name=>{ const k=name||"(model yok)"; if(!m.has(k)) m.set(k,{model:k,ord:0,yol:0,dep:0,depCost:0,irak:0,irakCost:0,soldY:0,revY:0}); return m.get(k); };
+  const g=name=>{ const k=name||"(model yok)"; if(!m.has(k)) m.set(k,{model:k,ord:0,yol:0,dep:0,depCost:0,irak:0,irakCost:0,kons:0,konsCost:0,soldY:0,revY:0}); return m.get(k); };
   if(!pid.startsWith("n:")) for(const md of (S.products[pid]?.models||[])) g(md);
   for(const ci of C.item.values()){
     if(!matchProd(ci.it,pid) || !inFirm(ci.lot)) continue;
     const r=g(ci.it.model), st=ci.lot.status, left=Math.max(0,hereLeft(ci)), ir=Math.max(0,irakLeft(ci));
+    if(ci.konsKg>0.5){ r.kons+=ci.konsKg; r.konsCost+=ci.konsKg*landedOf(ci); }
     if(ir>0&&st!=="kapandi"){ r.irak+=ir; r.irakCost+=ir*landedOf(ci); }
     if(st==="siparis"||st==="onodeme") r.ord+=left; else if(st==="yuklendi"||st==="yolda") r.yol+=left; else if(st==="depoda"){ if(isIrakDest(ci.lot)){ r.irak+=left; r.irakCost+=left*landedOf(ci); } else { r.dep+=left; r.depCost+=left*landedOf(ci); } }
   }
   for(const s of S.sales){ if(!(s.date||"").startsWith(yr) || !inFirm(s)) continue;
-    for(const {ln,ci,amtUSD} of SC(s).lines){ if(!ci||!matchProd(ci.it,pid)) continue; const r=g(ci.it.model); r.soldY+=+ln.kg||0; r.revY+=amtUSD; } }
+    for(const {ci,amtUSD,soldKg} of SC(s).lines){ if(!ci||!matchProd(ci.it,pid)||!soldKg) continue; const r=g(ci.it.model); r.soldY+=soldKg; r.revY+=amtUSD; } }
   return [...m.values()];
 }
 function prodList(){
@@ -276,7 +277,7 @@ const prodChips = () => `<div class="chips" role="group" aria-label="Ürün"><bu
 function modelTable(rows){
   if(!rows.length) return `<div class="empty">Henüz model yok. Ayarlar → Ürünler ve modeller'den ekleyebilir ya da alım girerken yazabilirsin.</div>`;
   const kg=(v,cost)=>v?`${nf0.format(Math.round(v))}${cost!==undefined?`<br><span class="muted" style="font-size:12px">$${nf2.format(cost/v)}/kg</span>`:""}`:`<span class="muted">—</span>`;
-  const cols=[["ord","Sipariş",r=>kg(r.ord)],["yol","Yolda",r=>kg(r.yol)],["dep","Mersin SB",r=>kg(r.dep,r.depCost)],["irak","Irak deposu",r=>kg(r.irak,r.irakCost)],
+  const cols=[["ord","Sipariş",r=>kg(r.ord)],["yol","Yolda",r=>kg(r.yol)],["dep","Mersin SB",r=>kg(r.dep,r.depCost)],["irak","Irak deposu",r=>kg(r.irak,r.irakCost)],["kons","Konsinyede",r=>kg(r.kons,r.konsCost)],
     ["soldY",`${today().slice(0,4)} satış`,r=>r.soldY?`${nf0.format(r.soldY)}<br><span class="muted" style="font-size:12px">ort. $${nf2.format(r.revY/r.soldY)}/kg</span>`:`<span class="muted">—</span>`]].filter(([k])=>rows.some(r=>r[k]));
   return `<div class="tablewrap"><table><thead><tr><th>Model</th>${cols.map(([,t])=>`<th class="r">${t}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.model)}</b></td>${cols.map(([,,f])=>`<td class="r">${f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
@@ -284,8 +285,8 @@ function modelTable(rows){
 function modelChips(rows){
   const chip=(cls,t,v)=>`<span class="stk" style="--c:var(--st-${cls})"><i></i>${t} <b>${nf0.format(Math.round(v))}</b> kg</span>`;
   return `<div class="mrows">${rows.map(r=>{
-    const chips=[r.dep?chip("depoda","Mersin SB",r.dep):"",r.irak?chip("irak","Irak",r.irak):"",r.yol?chip("yolda","Yolda",r.yol):"",r.ord?chip("siparis","Siparişte",r.ord):""].filter(Boolean);
-    const stockKg=r.dep+r.irak, cost=r.depCost+r.irakCost;
+    const chips=[r.dep?chip("depoda","Mersin SB",r.dep):"",r.irak?chip("irak","Irak",r.irak):"",r.kons?chip("kons","Konsinyede",r.kons):"",r.yol?chip("yolda","Yolda",r.yol):"",r.ord?chip("siparis","Siparişte",r.ord):""].filter(Boolean);
+    const stockKg=r.dep+r.irak+r.kons, cost=r.depCost+r.irakCost+r.konsCost;
     const sub=[stockKg?`maliyet $${nf2.format(cost/stockKg)}/kg`:"",r.soldY?`bu yıl ${nf0.format(r.soldY)} kg satıldı (ort. $${nf2.format(r.revY/r.soldY)})`:""].filter(Boolean).join(" · ");
     return `<div class="mrow2"><div class="mn">${esc(r.model)}</div><div class="mc">${chips.length?chips.join(""):`<span class="muted" style="font-size:13px">stok yok</span>`}</div>${sub?`<div class="ms muted">${sub}</div>`:""}</div>`; }).join("")}</div>`;
 }
@@ -294,11 +295,11 @@ function vUrunler(){
   const ps=prodList();
   if(!ps.length) return h+`<div class="panel"><div class="empty">Ürün listesi yükleniyor…</div></div>`;
   const active=[], idle=[];
-  for(const p of ps){ const st=prodStats(p.id); (st.some(r=>r.ord||r.yol||r.dep||r.irak||r.soldY)||S.lots.some(l=>inFirm(l)&&lotHasProd(l,p.id)&&l.status!=="kapandi") ? active : idle).push(p); }
+  for(const p of ps){ const st=prodStats(p.id); (st.some(r=>r.ord||r.yol||r.dep||r.irak||r.kons||r.soldY)||S.lots.some(l=>inFirm(l)&&lotHasProd(l,p.id)&&l.status!=="kapandi") ? active : idle).push(p); }
   const orphan=S.lots.filter(l=>inFirm(l)&&l.status==="kapandi"&&lotLeft(l)>0.5);
   if(orphan.length) h+=`<div class="fnote" style="margin-bottom:12px">Kapatılmış ama malı satılmamış görünen alımlar (stokta sayılmıyor): ${orphan.map(l=>`<button class="linkbtn" type="button" data-lot="${l.id}">${esc(lotProducts(l))} · ${esc(l.code)} · ${nf0.format(lotLeft(l))} kg</button>`).join(", ")}. Mal duruyorsa alımı açıp <b>“Tekrar aç”</b> de.</div>`;
   if(!active.length) h+=`<div class="panel"><div class="empty">Henüz açık alım yok. Sağ alttaki <b>+</b> ile ilk alımını gir; ürünler burada model model görünür.</div></div>`;
-  h+=`<div class="prods">${active.map(p=>{ const rows=prodStats(p.id).filter(r=>r.ord||r.yol||r.dep||r.irak||r.soldY);
+  h+=`<div class="prods">${active.map(p=>{ const rows=prodStats(p.id).filter(r=>r.ord||r.yol||r.dep||r.irak||r.kons||r.soldY);
     const n=S.lots.filter(l=>inFirm(l)&&lotHasProd(l,p.id)&&l.status!=="kapandi").length;
     return `<section class="pcard" data-prodsheet="${esc(p.id)}" role="button" tabindex="0" aria-label="${esc(p.name)} ayrıntısı"><div class="prod-h"><h3>${esc(p.name)}</h3><span class="muted">${n?n+" açık alım":"açık alım yok"}</span><span class="chev" aria-hidden="true">›</span></div>${modelChips(rows)}</section>`; }).join("")}</div>`;
   if(idle.length) h+=`<p class="muted" style="margin:0;font-size:14px">Stokta ya da yolda malı olmayan ürünler: ${idle.map(p=>`<button class="linkbtn" type="button" data-prodsheet="${esc(p.id)}">${esc(p.name)}</button>`).join(" · ")}</p>`;
@@ -567,8 +568,9 @@ function sLot(id){
   const anyIrak=l.items.some(it=>C.item.get(l.id+"|"+it.k)?.irakIn>0);
   const itRows=l.items.map(it=>{ const ci=C.item.get(l.id+"|"+it.k); const sold=ci?.soldKg||0; const here=Math.max(0,ci?hereLeft(ci):(+it.kg||0)), ir=ci?Math.max(0,irakLeft(ci)):0;
     const stk=isIrakDest(l)&&l.status==="depoda"?[["irak","Irak deposu",here]]:[[l.status,stS(l,l.status),here],["irak","Irak",ir]];
+    if(ci?.konsKg>0.5) stk.push(["kons","Konsinyede",ci.konsKg]);
     return `<div class="row lline"><span class="main"><div class="t">${esc(itemProd(it))} <span class="mdl">${esc(it.model||"")}</span></div>
-      <div class="sub">${nf0.format(+it.kg||0)} kg alındı${sold?` · ${nf0.format(sold)} kg satıldı`:""}${ci?.adjKg?` · ${ci.adjKg>0?nf0.format(ci.adjKg)+" kg fire":nf0.format(-ci.adjKg)+" kg fazla"}`:""}${ci&&Math.abs(landedOf(ci)-ci.cu)>0.0005?` · maliyet <b>$${nf4.format(landedOf(ci))}/kg</b>`:""}</div>
+      <div class="sub">${nf0.format(+it.kg||0)} kg alındı${sold-(ci?.konsKg||0)>0.5?` · ${nf0.format(sold-(ci?.konsKg||0))} kg satıldı`:""}${ci?.adjKg?` · ${ci.adjKg>0?nf0.format(ci.adjKg)+" kg fire":nf0.format(-ci.adjKg)+" kg fazla"}`:""}${ci&&Math.abs(landedOf(ci)-ci.cu)>0.0005?` · maliyet <b>$${nf4.format(landedOf(ci))}/kg</b>`:""}</div>
       <div class="rschips">${stk.filter(([,,v])=>v>0.5).map(([c2,t,v])=>`<span class="stk" style="--c:var(--st-${c2})"><i></i>${t} <b>${nf0.format(v)}</b> kg</span>`).join("")||`<span class="stk" style="--c:var(--st-kapandi)"><i></i>bitti</span>`}</div></span>
       <span class="end"><div class="a">${l.cur==="TL"?nf2.format(+it.price||0)+" ₺":"$"+nf4.format(+it.price||0)}</div><div class="b">/${unit}</div></span></div>`; }).join("");
   const o=l.ortak?.on;
@@ -641,10 +643,10 @@ const expRows = es => es.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||
 function sSale(id){
   const s=saleById(id); if(!s) return null; const c=SC(s);
   const unit=s.priceUnit==="ton"?"ton":"kg";
-  const rows=c.lines.map(({ln,ci,amtUSD})=>{ const gp=ci?amtUSD-(+ln.kg||0)*ci.cu:null;
+  const rows=c.lines.map(({ln,ci,amtUSD,soldKg})=>{ const gp=ci&&soldKg>0?amtUSD-soldKg*landedOf(ci):null;
     return `<div class="row lline"><span class="main"><div class="t">${ci?esc(itemProd(ci.it)):"?"} ${ci?`<span class="mdl">${esc(ci.it.model||"")}</span>`:""}${ln.loc==="irak"||isIrakDest(ci?.lot)?` <span class="badge">Irak deposundan</span>`:""}</div>
       <div class="sub">${ci?`<button type="button" class="linkbtn" data-lot="${ci.lot.id}">${esc(ci.lot.code)}</button> · `:""}${nf0.format(+ln.kg||0)} kg × ${s.cur==="TL"?nf2.format(+ln.price||0)+" ₺":"$"+nf4.format(+ln.price||0)}/${unit}${s.realLater?" (fatura)":""}</div></span>
-      <span class="end"><div class="a">${moneyf((+ln.kg||0)*(+ln.ppk||0),s.cur)}</div>${gp!==null?`<div class="b" style="color:${gp>=0?"var(--good)":"var(--bad)"}">kâr ${usdf(gp)}${s.realLater?" (gerçek)":""}</div>`:""}</span></div>`; }).join("");
+      <span class="end"><div class="a">${moneyf((+ln.kg||0)*(+ln.ppk||0),s.cur)}</div>${gp!==null?`<div class="b" style="color:${gp>=0?"var(--good)":"var(--bad)"}">kâr ${usdf(gp)}${s.realLater?" (satılan)":""}</div>`:s.realLater?`<div class="b">satılınca</div>`:""}</span></div>`; }).join("");
   const body=`<div class="dhead"><div class="code"><span>${fd(s.date)}</span><span class="pill" style="color:var(--firm-b)">${esc(MK[s.market]||"")}</span>${c.olot?`<span class="badge">Ortak alım satışı</span>`:""}${exBadge(s)}</div><div class="ttl">${esc(saleCustomer(s))}</div></div>
     <div class="panel rows">${rows}</div>
     ${c.olot?`<div class="fnote">Bu satış ortak alım <b>${esc(c.olot.code)}</b> hesabına işlenir. Ortaktan havale, ortağın ödediği masraf/vergi ve kapama ortak alımın sayfasından girilir. <button class="btn sm" type="button" data-lot="${c.olot.id}">${esc(c.olot.code)} ortak hesabını aç →</button></div>`:saleMoneyHTML(s,c)}
@@ -1778,7 +1780,7 @@ function partyLedger(pk,dir,F=inFirm){
   const rows=[];
   if(ted){ for(const l of S.lots.filter(F)) if(pkey(l.supplierId,l.supplier)===pk) rows.push({d:l.orderDate||(l.createdAt||"").slice(0,10),t:`${l.code} · ${l.items.map(itemLabel).join(", ")} alımı`,kind:"purchase",ref:l.code,lot:l,a:LC(l).costUSD,p:0,attr:`data-lot="${l.id}"`}); }
   else{
-    for(const s of S.sales.filter(F)) if(!SC(s).olot && pkey(s.customerId,s.customer)===pk){ const c=SC(s); rows.push({d:s.date,t:`${MK[s.market]||"Satış"} · ${saleLinesTxt(s)}${c.est?" (fiyat kısmen tahmini)":""}`,kind:"sale",ref:s.docNo||s.ciNo||s.pfNo||"",sale:s,a:c.revUSD,p:0,attr:`data-sale="${s.id}"`});
+    for(const s of S.sales.filter(F)) if(!SC(s).olot && pkey(s.customerId,s.customer)===pk){ const c=SC(s); rows.push({d:s.date,t:`${MK[s.market]||"Satış"} · ${saleLinesTxt(s)}${s.realLater?(c.est?" (konsinye · satılan kısım)":" (konsinye)"):""}`,kind:"sale",ref:s.docNo||s.ciNo||s.pfNo||"",sale:s,a:c.revUSD,p:0,attr:`data-sale="${s.id}"`});
       for(const x of c.exps.filter(x=>x.paidBy==="alici")) rows.push({d:x.date,t:`Bizim yerimize ödediği masraf · ${x.cat||""}`,kind:"bexp",ref:x.cat||"",a:0,p:expUSD(x),attr:`data-exp="${x.id}"`}); }
     for(const x of S.pays.filter(F)) if(x.dir==="out" && isCusParty(x.partyId) && pkey(x.partyId,x.party)===pk) rows.push({d:x.date,t:`Elden verilen${x.kind?" · "+x.kind:""}`,kind:"advance",ref:x.bank||"",a:usd(x.amount,x.cur,x.kur),p:0,attr:`data-pay="${x.id}"`});
     for(const l of S.lots.filter(F)) if(l.ortak?.on && pkey(l.ortak.partnerId,"")===pk){ const c=LC(l); const lastSale=c.sales.map(s=>s.date).sort().pop(); rows.push({d:lastSale||l.arriveDate||l.orderDate,t:`${l.code} ortak alım · dönmesi gereken (sermaye + masraf + %${nf0.format(+l.ortak.share||0)} kâr)`,kind:"ortak",ref:l.code,lot:l,a:c.owe||0,p:0,attr:`data-lot="${l.id}"`}); }
@@ -2065,7 +2067,7 @@ function rpLines(per){
   const inP = d => per==="all" ? true : per.startsWith("y:") ? String(d||"").startsWith(per.slice(2)) : String(d||"").slice(0,7)===per.slice(2);
   const out=[];
   for(const s of S.sales){ if(!inFirm(s)||!inP(s.date)) continue; const c=SC(s); const kgT=c.kg||sum(c.lines,x=>+x.ln.kg||0);
-    for(const x of c.lines){ if(!x.ci) continue; const kg=+x.ln.kg||0, sh=kgT?kg/kgT:0; const share=x.ci.lot.ortak?.on?(+x.ci.lot.ortak.share||0)/100:1;
+    for(const x of c.lines){ if(!x.ci) continue; const kg=x.soldKg, sh=kgT?(+x.ln.kg||0)/kgT:0; const share=x.ci.lot.ortak?.on?(+x.ci.lot.ortak.share||0)/100:1;
       const rev=x.amtUSD, cogs=kg*landedOf(x.ci), exp=c.exp*sh, kur=c.kap.gain*sh; const mal=(rev-cogs-exp)*share, kr=kur*share;
       out.push({s,ci:x.ci,kg,rev,cogs,exp,mal,kur:kr,profit:mal+kr,est:c.est,ortak:share<1,month:String(s.date||"").slice(0,7),market:s.market,firm:s.firmId}); } }
   return out;
@@ -2085,11 +2087,11 @@ function vRapor(){
   const anyEst=L.some(x=>x.est), anyOrt=L.some(x=>x.ortak);
   h+=`<div class="money rpm"><div><div class="l">Satış</div><div class="v">${usdf(rev)}</div></div><div><div class="l">Malın maliyeti</div><div class="v">${usdf(T("cogs"))}</div></div><div><div class="l">Satış masrafları</div><div class="v">${usdf(T("exp"))}</div></div>
     <div><div class="l">Mal kârı</div><div class="v ${mal>=0?"good":"bad"}">${usdf(mal)}</div></div><div><div class="l">Kur farkı kârı</div><div class="v ${kur>0?"good":""}">${kur?usdf(kur):"—"}</div></div><div><div class="l">Toplam kâr · marj</div><div class="v ${pr>=0?"good":"bad"}">${usdf(pr)} <small class="muted">${pct(pr)}</small></div></div></div>`;
-  const notes=[anyEst?"Fiyatı henüz belli olmayan konsinye satışlarda bekleyen kısım fatura fiyatından tahmini.":"",anyOrt?"Ortak alım satışlarında kârın bizim payı alındı.":""].filter(Boolean);
+  const notes=[anyEst?"Konsinyede bekleyen mal satılınca rapora girer.":"",anyOrt?"Ortak alım satışlarında kârın bizim payı alındı.":""].filter(Boolean);
   if(notes.length) h+=`<p class="muted foot-note">${notes.join(" ")}</p>`;
   // ürün → model
   const byP=new Map(); for(const x of L){ const p=itemProd(x.ci.it), m=x.ci.it.model||"(model yok)"; if(!byP.has(p)) byP.set(p,new Map()); const mm=byP.get(p); const r=mm.get(m)||{kg:0,rev:0,cogs:0,profit:0}; r.kg+=x.kg; r.rev+=x.rev; r.cogs+=x.cogs; r.profit+=x.profit; mm.set(m,r); }
-  h+=`<div class="dsec"><div class="h"><h4>Ürün ve model</h4></div>${[...byP].sort((a,b)=>sum([...b[1].values()],r=>r.profit)-sum([...a[1].values()],r=>r.profit)).map(([p,mm])=>`<div class="panel rpp"><div class="rph"><b>${esc(p)}</b><span>${usdf(sum([...mm.values()],r=>r.profit))} kâr</span></div><div class="tablewrap"><table><thead><tr><th>Model</th><th class="r">Satılan</th><th class="r">Ort. satış</th><th class="r">Ort. maliyet</th><th class="r">Kâr</th><th class="r">Marj</th></tr></thead><tbody>${[...mm].sort((a,b)=>b[1].profit-a[1].profit).map(([m,r])=>`<tr><td><b>${esc(m)}</b></td><td class="r">${nf0.format(r.kg)} kg</td><td class="r">$${nf4.format(r.rev/r.kg)}/kg</td><td class="r">$${nf4.format(r.cogs/r.kg)}/kg</td><td class="r" style="color:${r.profit>=0?"var(--good)":"var(--bad)"}">${usdf(r.profit)}</td><td class="r">${r.rev?`%${nf2.format(r.profit/r.rev*100)}`:"—"}</td></tr>`).join("")}</tbody></table></div></div>`).join("")}</div>`;
+  h+=`<div class="dsec"><div class="h"><h4>Ürün ve model</h4></div>${[...byP].sort((a,b)=>sum([...b[1].values()],r=>r.profit)-sum([...a[1].values()],r=>r.profit)).map(([p,mm])=>`<div class="panel rpp"><div class="rph"><b>${esc(p)}</b><span>${usdf(sum([...mm.values()],r=>r.profit))} kâr</span></div><div class="tablewrap"><table><thead><tr><th>Model</th><th class="r">Satılan</th><th class="r">Ort. satış</th><th class="r">Ort. maliyet</th><th class="r">Kâr</th><th class="r">Marj</th></tr></thead><tbody>${[...mm].filter(([,r])=>r.kg>0).sort((a,b)=>b[1].profit-a[1].profit).map(([m,r])=>`<tr><td><b>${esc(m)}</b></td><td class="r">${nf0.format(r.kg)} kg</td><td class="r">$${nf4.format(r.rev/r.kg)}/kg</td><td class="r">$${nf4.format(r.cogs/r.kg)}/kg</td><td class="r" style="color:${r.profit>=0?"var(--good)":"var(--bad)"}">${usdf(r.profit)}</td><td class="r">${r.rev?`%${nf2.format(r.profit/r.rev*100)}`:"—"}</td></tr>`).join("")}</tbody></table></div></div>`).join("")}</div>`;
   // pazar / firma
   const grp=(key,name)=>{ const m=new Map(); for(const x of L){ const k=x[key]; const r=m.get(k)||{rev:0,profit:0,kur:0}; r.rev+=x.rev; r.profit+=x.profit; r.kur+=x.kur; m.set(k,r); } return [...m].sort((a,b)=>b[1].rev-a[1].rev).map(([k,r])=>`<tr><td><b>${esc(name(k))}</b></td><td class="r">${usdf(r.rev)}</td><td class="r">${r.kur?usdf(r.kur):"—"}</td><td class="r" style="color:${r.profit>=0?"var(--good)":"var(--bad)"}">${usdf(r.profit)}</td><td class="r">${r.rev?`%${nf2.format(r.profit/r.rev*100)}`:"—"}</td></tr>`).join(""); };
   const tbl=(t,rows)=>`<div class="dsec"><div class="h"><h4>${t}</h4></div><div class="panel"><div class="tablewrap"><table><thead><tr><th>${t}</th><th class="r">Satış</th><th class="r">Kur farkı</th><th class="r">Kâr</th><th class="r">Marj</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
@@ -2107,12 +2109,15 @@ function kapRows(list,ctx){
   return list.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(k=>{ const inn=sum(k.ins||[],x=>+x.amt||0), g=inn?inn-(+k.out||0):null;
     return `<div class="row kaprow"><span class="typeic kap">KAP</span><span class="main"><div class="t">${usdf(+k.out||0)} elden → ${inn?usdf(inn)+" resmi":"<span style='color:var(--warn)'>resmi havale bekleniyor</span>"}</div>
       <div class="sub">${fd(k.date)} · ${esc(accName(k.outAcc||accKey(KASA,"USD")).split(" · ")[0])}${(k.ins||[]).map(x=>` · ${fd(x.date)} ${usdf(+x.amt||0)} → ${esc(String(x.bank||"").split("|")[0])}`).join("")}${k.note?" · "+esc(k.note):""}</div></span>
-      <span class="end">${g!==null?`<div class="a" style="color:${g>=0?"var(--good)":"var(--bad)"}">${g>=0?"+":"−"}${usdf(Math.abs(g))}</div><div class="b">kur farkı${k.out?` · %${nf2.format(g/(+k.out)*100)}`:""}</div>`:""}</span>
+      <span class="end">${g!==null?`<div class="a" style="color:${g>=0?"var(--good)":"var(--bad)"}">${g>=0?"+":"−"}${usdf(Math.abs(g))}</div><div class="b">kur farkı${k.out?` · %${nf2.format(g/(+k.out)*100)}`:""}</div>${k.out&&(g<0||g/(+k.out)>0.25)?`<div class="b" style="color:var(--warn)">oran beklenmedik — nakdin bir kısmı masraf/avans mıydı?</div>`:""}`:""}</span>
       ${canWrite&&db?`<div class="kbtns"><button class="btn sm" type="button" data-act="kap-in" data-id="${k.id}">+ Resmi havale</button><button class="btn sm" type="button" data-act="kap-del" data-id="${k.id}">Sil</button></div>`:""}</div>`; }).join("");
 }
 function saleMoneyHTML(s,c){
   if(!irakMode(s,c)) return `<div class="money"><div><div class="l">Satış tutarı</div><div class="v">${moneyf(c.tot,s.cur)}</div></div><div><div class="l">Tahsil edilen</div><div class="v">${usdf(c.got)}</div></div><div><div class="l">Kalan alacak</div><div class="v ${c.due>1?"warn":"good"}">${c.due>1?usdf(c.due):"Yok"}</div></div></div>`;
-  const W=canWrite&&db; const cost=sum(c.lines,x=>x.ci?(+x.ln.kg||0)*x.ci.cu:0); const mal=c.revUSD-cost-c.exp; const eld=isElden(s.firmId); let no=0;
+  const W=canWrite&&db;
+  // malın gerçek maliyeti = alış + alım masraf payı (navlun, depo…) + fire payı; sadece satılan kg için
+  const buy=sum(c.lines,x=>x.ci?x.soldKg*x.ci.cu:0), lotExp=sum(c.lines,x=>x.ci?x.soldKg*(x.ci.perKg||0):0), fire=sum(c.lines,x=>x.ci?x.soldKg*x.ci.cu*((x.ci.fireK||1)-1):0);
+  const cost=buy+lotExp+fire, soldAny=c.lines.some(x=>x.soldKg>0); const mal=c.revUSD-cost-c.exp; const eld=isElden(s.firmId); let no=0;
   // 1) Resmi durum (Elden kayıtta resmi taraf yok)
   let h=eld?"":`<div class="isec"><div class="ih"><span class="num">${++no}</span><h4>Resmi durum (fatura)</h4>${W&&c.offDue>1?`<button class="btn sm pri" type="button" data-act="kap-new" data-sale="${s.id}">Kapama yap</button>`:""}</div>
     <div class="money"><div><div class="l">Fatura</div><div class="v">${usdf(c.totUSD)}</div></div><div><div class="l">Resmi gelen</div><div class="v">${usdf(c.offPaid)}</div></div><div><div class="l">Resmi kalan</div><div class="v ${c.offDue>1?"warn":"good"}">${c.offDue>1?usdf(c.offDue):"Kapandı ✓"}</div></div></div>
@@ -2125,22 +2130,31 @@ function saleMoneyHTML(s,c){
         return `<div class="row rsline"><span class="main"><div class="t"><b>${x.ci?esc(itemProd(x.ci.it)):"?"}</b> ${x.ci?esc(x.ci.it.model||""):""} <span class="muted">· faturada ${nf0.format(+x.ln.kg||0)} kg</span></div>
           <div class="rschips"><span class="stk" style="--c:var(--good)"><i></i>Satıldı <b>${nf0.format(x.realKg)}</b> kg${x.realKg?` · ort. ${moneyf(avg*(unit==="ton"?1000:1),s.cur)}/${unit}`:""}</span>${pend>0.5?`<span class="stk" style="--c:var(--st-irak)"><i></i>Bekliyor <b>${nf0.format(pend)}</b> kg</span>`:`<span class="stk" style="--c:var(--good)"><i></i>bitti ✓</span>`}</div></span></div>`; }).join("")}</div>
       ${(s.real||[]).length?`<div class="panel rows">${s.real.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(r=>`<div class="row"><span class="typeic t">SAT</span><span class="main"><div class="t">${(r.lines||[]).map(z=>{ const x=c.lines.find(q=>q.i===z.i); return `${x?.ci?esc(itemLabel(x.ci.it)):"?"} ${nf0.format(+z.kg||0)} kg × ${moneyf(+z.price||0,s.cur)}`; }).join(", ")}</div><div class="sub">${fd(r.date)}${r.note?" · "+esc(r.note):""}</div></span>${W?`<span class="end"><button class="btn sm" type="button" data-act="real-del" data-id="${s.id}" data-r="${esc(r.id)}">Sil</button></span>`:""}</div>`).join("")}</div>`:""}
-      ${c.est?`<p class="ihint">Bekleyen mal satılana kadar kâr ve alacak, bekleyen kısım için <b>fatura fiyatından tahmini</b> hesaplanır.</p>`:""}</div>`;
+</div>`;
   }
   // 3) Alıcıyla hesap (gerçek)
   h+=`<div class="isec"><div class="ih"><span class="num">${++no}</span><h4>${esc(saleCustomer(s))} ile hesap</h4></div>
     <div class="panel"><table class="ledger"><tbody>
-      <tr><td>Satış${s.realLater?(c.est?" (bekleyen kısım tahmini)":" (gerçek fiyatlarla)"):""}</td><td class="r">+${usdf(c.revUSD)}</td></tr>
+      <tr><td>Satış${s.realLater?" (satılan kısım, gerçek fiyat)":""}</td><td class="r">+${usdf(c.revUSD)}</td></tr>
       ${c.buyerExp?`<tr><td>Bizim yerimize ödediği masraflar</td><td class="r">−${usdf(c.buyerExp)}</td></tr>`:""}
       ${c.gave?`<tr><td>Ona elden verdiğimiz</td><td class="r">+${usdf(c.gave)}</td></tr>`:""}
       <tr><td>Tahsil edilen (elden + banka)</td><td class="r">−${usdf(c.got)}</td></tr>
     </tbody><tfoot><tr><td>${c.due>=-1?"Kalan alacak":"Biz ona borçluyuz"}</td><td class="r" style="color:${c.due>1?"var(--warn)":c.due<-1?"var(--bad)":"var(--good)"}">${Math.abs(c.due)>1?usdf(Math.abs(c.due)):"Yok"}</td></tr></tfoot></table></div>
     ${W?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-act="pay-sale" data-id="${s.id}">+ Tahsilat (elden / banka)</button><button class="btn sm" type="button" data-act="buyer-pay" data-id="${s.id}">+ Alıcıya elden ödeme</button><button class="btn sm" type="button" data-act="buyer-exp" data-id="${s.id}">+ Yerimize ödediği masraf</button></div>`:""}
     </div>`;
-  // 4) Kâr
+  // 4) Kâr — adım adım
+  const line=(t,v,cls="")=>`<tr><td>${t}</td><td class="r ${cls}">${v}</td></tr>`;
   h+=`<div class="isec"><div class="ih"><span class="num">${++no}</span><h4>Kâr</h4></div>
-    <div class="money"><div><div class="l">Mal kârı${c.est?" (tahmini)":""}</div><div class="v ${mal>0?"good":mal<0?"bad":""}">${usdf(mal)}</div></div><div><div class="l">Kur farkı kârı</div><div class="v ${c.kap.gain>0?"good":""}">${c.kap.gain?usdf(c.kap.gain):"—"}</div></div><div><div class="l">Toplam</div><div class="v ${mal+c.kap.gain>0?"good":"bad"}">${usdf(mal+c.kap.gain)}</div></div></div>
-    </div>`;
+    <div class="panel"><table class="ledger"><tbody>
+      ${line(s.realLater?"Satış (satılan kısım, gerçek fiyat)":"Satış",soldAny||!s.realLater?"+"+usdf(c.revUSD):`<span class="muted">mal satılınca</span>`)}
+      ${line("Malın alış maliyeti","−"+usdf(buy))}
+      ${lotExp>0.5?line("Alımın masraf payı <span class='muted'>(navlun, depo, gümrükçü…)</span>","−"+usdf(lotExp)):""}
+      ${fire>0.5?line("Fire payı","−"+usdf(fire)):""}
+      ${line(`Bu satışın masrafları${c.buyerExp?" <span class='muted'>(alıcının ödedikleri dahil)</span>":""}`,c.exp?"−"+usdf(c.exp):"—")}
+      <tr class="sub"><td><b>Mal kârı</b></td><td class="r" style="color:${mal>=0?"var(--good)":"var(--bad)"}"><b>${usdf(mal)}</b></td></tr>
+      ${c.kap.list.length?line("Kur farkı kârı (kapama)",(c.kap.gain>=0?"+":"−")+usdf(Math.abs(c.kap.gain))):""}
+    </tbody><tfoot><tr><td>Toplam kâr</td><td class="r" style="color:${mal+c.kap.gain>=0?"var(--good)":"var(--bad)"}">${usdf(mal+c.kap.gain)}</td></tr></tfoot></table></div>
+    ${s.realLater&&c.pendKg>0.5?`<p class="ihint">${nf0.format(c.pendKg)} kg henüz müşteride bekliyor; satıldıkça kâra eklenir.</p>`:""}</div>`;
   return h;
 }
 /* + menüsünden açılan Irak işlemleri için hedef listesi: Irak satışları ve ortak alımlar */
@@ -2160,10 +2174,11 @@ function kapForm(pre){
   openForm({title:"Kapama yap",values:{date:today(),date2:today(),outAcc:KASA,inBank:"",out:null,inn:null},fields:[
     {k:"n",type:"note",text:s?`<b>${esc(saleCustomer(s))}</b> faturası · resmi kalan <b>${usdf(target)}</b>. Elden gönderdiğin nakdi ve karşılığında gelen resmi havaleyi yaz; aradaki fark kur farkı kârı olarak işlenir.`:`<b>${esc(l.code)}</b> ortak alımı · kur farkı kârı ortak hesabına (kâr payına göre) işlenir.`},
     {section:"Giden: elden nakit"},
-    {k:"out",label:"Elden gönderilen nakit (USD)",type:"num",req:true,half:true},
+    {k:"out",label:"Dinara çevrilip resmi havaleye dönecek nakit (USD)",type:"num",req:true,half:true,hint:"Sadece kapama için verilen kısım"},
     {k:"date",label:"Tarih",type:"date",req:true,half:true},
     acctSel("outAcc","Hangi kasadan / hesaptan çıktı",{req:true,half:true}),
     {k:"note",label:"Kimle / not",half:true,ph:"Elden, kimin aracılığıyla…"},
+    ...(s?[{k:"extra",label:"Aynı gönderimde masraf / avans için verilen (varsa)",type:"num",half:true,hint:"Kur farkına karışmaz; alıcıya elden ödeme olarak ayrı kaydedilir"}]:[]),
     {section:"Gelen: resmi havale"},
     {k:"inn",label:"Gelen resmi havale (USD)",type:"num",half:true,hint:"Henüz gelmediyse boş bırak; gelince kapamaya “+ Resmi havale” ile eklersin"},
     {k:"date2",label:"Geliş tarihi",type:"date",half:true},
@@ -2179,6 +2194,7 @@ function kapForm(pre){
     if(x.inn>0&&!x.inBank) return "Resmi havalenin geldiği bankayı seç.";
     const doc=stamp({firmId:(s||l).firmId,saleId:s?.id||"",lotId:l?.id||"",date:x.date,out:x.out,outAcc:accKey(x.outAcc||KASA,"USD"),ins:x.inn>0?[{id:"i"+Date.now().toString(36),date:x.date2||x.date,amt:x.inn,bank:accKey(x.inBank,"USD")}]:[],note:x.note||""},true);
     await db.collection("kap").doc().set(doc);
+    if(s&&x.extra>0){ const pd=stamp({dir:"out",date:x.date,amount:x.extra,cur:"USD",kur:null,kind:"Masraf karşılığı elden",method:"Nakit",bank:accKey(x.outAcc||KASA,"USD").split("|")[0],note:"Kapama gönderimiyle birlikte",firmId:s.firmId,saleId:s.id,lotId:"",partyId:s.customerId||""},true); if(!s.customerId) pd.party=s.customer||""; await db.collection("pays").doc().set(pd); }
   }});
 }
 /* Irak'ta alıcının ya da ortağın bizim yerimize ödediği masraf (+ menüsünden) */
