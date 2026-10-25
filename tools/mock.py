@@ -4,7 +4,7 @@ import json, shutil, os
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 out = os.path.join(root, '.mock'); os.makedirs(out, exist_ok=True)
 rows = json.load(open(os.path.join(root, 'baslangic.json'), encoding='utf-8'))
-mock = '''window.__T={offline:localStorage.getItem("mockoffline")==="1",hist:[],docs:%s,members:[{email:"gokhankaya1@yahoo.com",role:(localStorage.getItem("mockrole")||"owner"),name:"Gökhan"}],files:{},log:[]};
+mock = '''window.__T={offline:localStorage.getItem("mockoffline")==="1",hist:[],docs:%s,members:[{email:"gokhankaya1@yahoo.com",role:(localStorage.getItem("mockrole")||"owner"),name:"Gökhan",gizle:JSON.parse(localStorage.getItem("mockgizle")||"{}")},{email:"ali@ornek.com",role:"editor",name:"Ali",gizle:{}}],files:{},log:[]};
 (function(){const T=window.__T; const subs=[]; let hid=0;
 // veritabanı tetikleyicilerinin (supabase/v21) taklidi: sürüm + geçmiş
 const trig=(op,oldR,newR)=>{ if(newR){ const ov=oldR?.data?._v; newR.data={...newR.data,_v:op==="insert"?(newR.data._v??1):((Number.isInteger(ov)?ov:0)+1)}; }

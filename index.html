@@ -640,7 +640,9 @@ tfoot td{background:var(--surface-2)}
 .hrow .hdiff{font-size:13px;color:var(--fg);margin-top:4px;line-height:1.5}
 .hrow .end{align-self:center}
 /* personel: kâr/maliyet ve silme gizli (silme veritabanında da kapalı) */
-body.staff .fin,body.staff [data-act="del"],body.staff [data-act$="-del"],body.staff [data-act="export"],body.staff [data-act="hist-restore"]{display:none!important}
+body.g-kar .fin,body.g-sil [data-act="del"],body.g-sil [data-act$="-del"],body.g-sil [data-act="hist-restore"],body.g-excel [data-act="export"],body.g-excel .xlsec{display:none!important}
+.gzrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:13px}
+.gzrow .chip[aria-pressed="true"]{background:var(--bad-soft);color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
 #netbar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;max-width:min(560px,calc(100vw - 24px));background:var(--warn-soft);color:var(--fg);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);border-radius:10px;padding:8px 12px;font-size:13px;box-shadow:0 4px 18px rgba(0,0,0,.12);text-align:center}
 #netbar b{color:var(--warn)}
 @media (max-width:820px){#netbar{left:12px;right:84px;transform:none;max-width:none;bottom:calc(env(safe-area-inset-bottom,0px) + 80px);text-align:left}}
@@ -668,7 +670,7 @@ body.staff .fin,body.staff [data-act="del"],body.staff [data-act$="-del"],body.s
 
 <script src="supabase.js"></script>
 <script src="config.js?v=a7e2af8e99"></script>
-<script src="runtime.js?v=3256b320c4"></script>
+<script src="runtime.js?v=bb5414c28e"></script>
 <script src="calc.js?v=d52eaec8ed"></script>
-<script src="app.js?v=3df573a95f"></script>
+<script src="app.js?v=42ccb8481d"></script>
 </body></html>

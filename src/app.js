@@ -71,8 +71,11 @@ const VIEWS = [
 const S = {rp:"",lots:[],sales:[],pays:[],exps:[],trf:[],kap:[],firms:{},products:{},parties:{},lists:{},settings:{},pending:{},
   view:"urunler",firm:"all",prod:"all",stage:"all",market:"all",cari:"ted",q:"",pq:"",year:"all",atype:"all",stack:[],conn:""};
 let db=null, user=null, dl=null, assets=null, me=null, canWrite=true;
-/* personel: kayıt girer; kâr, maliyet, banka bakiyesi, Rapor ve Excel görmez, silemez (silme veritabanında da kapalı) */
-const STAFF = () => window.__members?.me.role==="staff";
+/* kişi bazında gizleme (sahip Ayarlar → Kullanıcılar'dan ayarlar): kar, banka, rapor, excel, sil. Eski "personel" rolü hepsini gizler. */
+const GIZ = [["kar","Kâr ve maliyet"],["banka","Banka ve kasa"],["rapor","Rapor"],["excel","Excel'e aktarma"],["sil","Kayıt silme"]];
+const GZ = k => { const m=window.__members?.me; if(!m||m.role==="owner") return false; return m.role==="staff"||!!(m.gizle||{})[k]; };
+const STAFF = () => GZ("kar");
+const noRapor = () => GZ("rapor")||GZ("kar");
 const C = {lot:new Map(), sale:new Map(), item:new Map(), events:[], unalloc:new Map(), payUSD:p=>usd(p.amount,p.cur,p.kur)};
 try{ const v=localStorage.getItem("pd.view"); if(VIEWS.some(x=>x.k===v)) S.view=v; const f=localStorage.getItem("pd.firm"); if(["all","a","b"].includes(f)) S.firm=f; }catch(e){}
 const save = (k,v)=>{ try{localStorage.setItem(k,v)}catch(e){} };
@@ -209,7 +212,7 @@ function prodList(){
 
 /* ---------- çizim ---------- */
 function renderChrome(){
-  const VS=VIEWS.filter(v=>!(STAFF()&&v.k==="rapor")); if(STAFF()&&S.view==="rapor") S.view="urunler";
+  const VS=VIEWS.filter(v=>!(noRapor()&&v.k==="rapor")); if(noRapor()&&S.view==="rapor") S.view="urunler";
   document.getElementById("tabs").innerHTML = VS.map(v=>`<button type="button" data-view="${v.k}" ${S.view===v.k?'aria-current="page"':""}>${v.t}</button>`).join("");
   document.getElementById("btabs").innerHTML = VS.map(v=>`<button type="button" data-view="${v.k}" ${S.view===v.k?'aria-current="page"':""}>${svg(v.ic,22)}${v.t}</button>`).join("");
   document.getElementById("firmsel").innerHTML = [["all","Tümü"],["a",firmName("a")],["b",firmName("b")],["x","Elden"]].map(([k,t])=>
@@ -334,9 +337,9 @@ function vSatislar(){
 function cariData(){ return CALC.partyBalances(S,{lot:C.lot,sale:C.sale,payUSD:C.payUSD},inFirm); }
 function vCari(){
   let h=`<div class="vh"><h2>Cari</h2>${canWrite&&db?(S.cari==="mal"?"":S.cari==="bnk"?`<button class="btn" type="button" data-act="trf-new">Transfer</button><button class="btn pri" type="button" data-act="bal-new">Bakiye gir</button>`:S.cari==="mas"?`<button class="btn pri" type="button" data-act="new-exp">+ Masraf</button>`:S.cari==="ted"?`<button class="btn" type="button" data-act="new-party" data-kind="supplier">+ Tedarikçi</button><button class="btn pri" type="button" data-act="new-pay-out">+ Ödeme</button>`:S.cari==="mus"?`<button class="btn" type="button" data-act="new-party" data-kind="customer">+ Müşteri</button><button class="btn pri" type="button" data-act="new-pay-in">+ Tahsilat</button>`:`<button class="btn pri" type="button" data-act="new-pay">+ Ödeme / tahsilat</button>`):""}</div>`;
-  h+=`<div class="seg tabseg" role="radiogroup" style="max-width:720px">${[["ted","Tedarikçiler"],["mus","Müşteriler"],["mal","Mal kimde"],["mas","Masraflar"],["hep","Tüm ödemeler"],["bnk","Banka / kasa"]].filter(([k])=>!(STAFF()&&k==="bnk")).map(([k,t])=>`<button type="button" role="radio" data-cari="${k}" aria-checked="${S.cari===k}">${t}</button>`).join("")}</div>`;
+  h+=`<div class="seg tabseg" role="radiogroup" style="max-width:720px">${[["ted","Tedarikçiler"],["mus","Müşteriler"],["mal","Mal kimde"],["mas","Masraflar"],["hep","Tüm ödemeler"],["bnk","Banka / kasa"]].filter(([k])=>!(GZ("banka")&&k==="bnk")).map(([k,t])=>`<button type="button" role="radio" data-cari="${k}" aria-checked="${S.cari===k}">${t}</button>`).join("")}</div>`;
   if(S.cari==="mas") return h+vMasraf();
-  if(S.cari==="bnk"&&!STAFF()) return h+vBanka();
+  if(S.cari==="bnk"&&!GZ("banka")) return h+vBanka();
   if(S.cari==="mal") return h+vMalKimde();
   if(S.cari==="hep"){
     const ps=S.pays.filter(inFirm).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
@@ -753,7 +756,7 @@ function sSettings(){
       ${window.__hist?r("hist-all","Son değişiklikler ve silinenler","Kim neyi ne zaman değiştirdi; silineni geri getir"):""}
       ${window.__members?r("set-users","Kullanıcılar",window.__members.me.role==="owner"?"Defteri kimlerin kullanabileceği":"Defteri kullananlar"):""}
     </div>
-    <div class="dsec"><div class="h"><h4>Dışa aktar</h4></div><p class="muted" style="margin:0;font-size:14px">Bütün alımlar, satışlar, ödemeler, masraflar, cari ve ürün stokları tek Excel dosyasında. Mali müşavire göndermek ya da yedek almak için.</p>${dl?`<button class="btn" type="button" data-act="export" style="align-self:flex-start">Excel'e aktar</button>`:`<p class="muted" style="margin:0;font-size:13px">Dışa aktarma bu görünümde kullanılamıyor.</p>`}</div>
+    <div class="dsec xlsec"><div class="h"><h4>Dışa aktar</h4></div><p class="muted" style="margin:0;font-size:14px">Bütün alımlar, satışlar, ödemeler, masraflar, cari ve ürün stokları tek Excel dosyasında. Mali müşavire göndermek ya da yedek almak için.</p>${dl?`<button class="btn" type="button" data-act="export" style="align-self:flex-start">Excel'e aktar</button>`:`<p class="muted" style="margin:0;font-size:13px">Dışa aktarma bu görünümde kullanılamıyor.</p>`}</div>
     <div class="dsec"><div class="h"><h4>Hesap</h4></div><p class="muted" style="margin:0;font-size:14px">Giriş yapan: <b>${esc(window.__members?.me.email||"")}</b></p><button class="btn" type="button" data-act="logout" style="align-self:flex-start">Çıkış yap</button></div>
     ${canWrite&&hasEx()?`<div class="dsec"><div class="h"><h4>Örnek kayıtlar</h4></div><button class="btn danger" type="button" data-act="clear-ex" style="align-self:flex-start">Örnek kayıtları sil</button></div>`:""}`;
   return {title:"Ayarlar",body};
@@ -840,7 +843,7 @@ function sUsers(){
   const M=window.__members; const owner=M.me.role==="owner"; const list=S.members;
   const RL={owner:"Sahip",editor:"Kayıt girebilir",staff:"Personel",viewer:"Sadece görür"};
   const body=`<p class="muted" style="margin:0;font-size:14px">Buraya eklediğin e-posta sahibi, <b>${esc(location.host)}</b> adresinde aynı e-postayla "Hesap oluştur" deyip şifresini belirler ve girer. Listede olmayan kimse kayıtları göremez.</p>
-    <div class="panel rows">${list?list.map(u=>`<div class="row"><span class="main"><div class="t">${esc(u.name||u.email)}</div><div class="sub">${esc(u.email)} · ${RL[u.role]||u.role}</div></span>${owner&&u.role!=="owner"?`<button class="btn sm danger" type="button" data-act="user-del" data-email="${esc(u.email)}">Çıkar</button>`:""}</div>`).join(""):`<div class="empty">Yükleniyor…</div>`}</div>
+    <div class="panel rows">${list?list.map(u=>`<div class="row" style="flex-wrap:wrap"><span class="main"><div class="t">${esc(u.name||u.email)}</div><div class="sub">${esc(u.email)} · ${RL[u.role]||u.role}</div>${u.role!=="owner"&&u.role!=="staff"?`<div class="gzrow">${owner?`<span class="muted">Göremez / yapamaz:</span>`:""}${GIZ.map(([k,l])=>{ const on=!!(u.gizle||{})[k]; return owner?`<button type="button" class="chip" data-act="user-gz" data-email="${esc(u.email)}" data-k="${k}" aria-pressed="${on}">${on?"✕ ":""}${l}</button>`:on?`<span class="badge">${l} kapalı</span>`:""; }).join("")}</div>`:""}</span>${owner&&u.role!=="owner"?`<button class="btn sm danger" type="button" data-act="user-del" data-email="${esc(u.email)}">Çıkar</button>`:""}</div>`).join(""):`<div class="empty">Yükleniyor…</div>`}</div>
     ${owner?`<button class="btn pri" type="button" data-act="user-add" style="align-self:flex-start">+ Kullanıcı ekle</button>`:""}`;
   return {title:"Kullanıcılar",body};
 }
@@ -849,7 +852,7 @@ function userForm(){
   openForm({title:"Kullanıcı ekle",values:{role:"editor"},fields:[
     {k:"email",label:"E-posta",req:true,itype:"email",im:"email"},
     {k:"name",label:"Adı (listede görünür)"},
-    {k:"role",label:"Yetki",type:"seg",options:[["editor","Ortak / yönetici"],["staff","Personel"],["viewer","Sadece görür"]],hint:"Personel kayıt girer; kâr, maliyet, banka bakiyesi ve Rapor'u görmez, kayıt silemez."},
+    {k:"role",label:"Yetki",type:"seg",options:[["editor","Kayıt girebilir"],["viewer","Sadece görür"]],hint:"Ekledikten sonra listede kişinin altındaki düğmelerle neyi göremeyeceğini seçebilirsin."},
   ],onSave:async v=>{ if(!/^\S+@\S+\.\S+$/.test(v.email)) return "Geçerli bir e-posta yaz."; try{ await window.__members.add(v.email.toLowerCase(),v.role,v.name||""); }catch(e){ return "Eklenemedi: "+(e?.message||"bilinmeyen hata"); } loadMembers(); }});
 }
 function sMail(){
@@ -2256,7 +2259,7 @@ function position(){
   const kur=kurFor(today())?.rate||0; let cash=0, tlNoKur=0;
   for(const f of BANK_FIRMS) if(S.firm==="all"||S.firm===f) for(const a of accounts(f).list){ if(a.k.endsWith("|TL")){ if(kur) cash+=a.bal/kur; else tlNoKur+=a.bal; } else cash+=a.bal; }
   const assets=[["Mersin SB'deki mal",st.dep],["Irak deposundaki mal",st.irak],["Yoldaki mal",st.yol],["Siparişteki mal",st.ord],["Konsinyedeki mal (müşteride)",st.kons],["Ortaktaki mal (ortak alım, satılmamış)",st.ortak],
-    ["Müşteri ve ortak alacakları",pos(PB.cus)],["Tedarikçilere verilen avans",neg(PB.sup)],["Kapamada bekleyen nakit",kapWait],[`Kasa ve bankalar${kur?` <span class="muted">(TL hesaplar ${nf4.format(kur)} kurla)</span>`:""}`,cash]];
+    ["Müşteri ve ortak alacakları",pos(PB.cus)],["Tedarikçilere verilen avans",neg(PB.sup)],["Kapamada bekleyen nakit",kapWait],...(GZ("banka")?[]:[[`Kasa ve bankalar${kur?` <span class="muted">(TL hesaplar ${nf4.format(kur)} kurla)</span>`:""}`,cash]])];
   const debts=[["Tedarikçilere borç",pos(PB.sup)],["Müşterilerden alınan avans",neg(PB.cus)]];
   return {assets,debts,tA:sum(assets,x=>x[1]),tD:sum(debts,x=>x[1]),tlNoKur};
 }
@@ -2266,11 +2269,11 @@ function vDurum(){
   h+=`<div class="dsec"><div class="h"><h4>Varlıklar</h4></div><div class="panel"><table class="ledger"><tbody>${P.assets.map(row).join("")}</tbody><tfoot><tr><td>Toplam</td><td class="r">${usdf(P.tA)}</td></tr></tfoot></table></div></div>`;
   h+=`<div class="dsec"><div class="h"><h4>Borçlar</h4></div><div class="panel"><table class="ledger"><tbody>${P.debts.map(row).join("")||`<tr><td class="muted">Borç yok</td><td></td></tr>`}</tbody><tfoot><tr><td>Toplam</td><td class="r">${usdf(P.tD)}</td></tr></tfoot></table></div></div>`;
   if(P.tlNoKur) h+=`<p class="muted foot-note">TL hesaplardaki ${moneyf(P.tlNoKur,"TL")} kur bilgisi olmadığı için toplama girmedi.</p>`;
-  h+=`<p class="muted foot-note">Mallar her şey dahil kg maliyetiyle (alış + alım masrafları). Kasa ve bankalar, girdiğin son gerçek bakiye ve sonrasındaki hareketlerle.</p>`;
+  h+=`<p class="muted foot-note">Mallar her şey dahil kg maliyetiyle (alış + alım masrafları).${GZ("banka")?"":" Kasa ve bankalar, girdiğin son gerçek bakiye ve sonrasındaki hareketlerle."}</p>`;
   return h;
 }
 function vRapor(){
-  if(STAFF()) return `<div class="panel"><div class="empty">Rapor sadece defter sahibine ve yöneticilere açık.</div></div>`;
+  if(noRapor()) return `<div class="panel"><div class="empty">Rapor senin için kapalı.</div></div>`;
   const rtab=`<div class="seg tabseg" role="radiogroup" style="max-width:420px;margin-bottom:14px">${[["durum","Genel durum"],["kar","Kâr raporu"]].map(([k,t2])=>`<button type="button" role="radio" data-act="rp-tab" data-k="${k}" aria-checked="${(S.rpv||"durum")===k}">${t2}</button>`).join("")}</div>`;
   if((S.rpv||"durum")==="durum") return `<div class="vh"><h2>Genel durum</h2><span class="muted">${fd(today())} itibarıyla</span></div>`+rtab+vDurum();
   return vRaporKar(rtab);
@@ -2869,6 +2872,8 @@ document.addEventListener("click",e=>{
         try{ await db.doc("settings/mail").set({...(S.settings.mail||{}),digest:g("digest"),backup:g("backup"),backupTo:to}); toast("Kaydedildi"); }catch(e){ toast(dbErr(e)); } },
       "mail-test":async()=>{ const old=t.textContent; t.disabled=true; t.textContent="Gönderiliyor…"; try{ const r=await window.__fn("haftalik",{test:d.t}); toast(r.gonderilen?.length?`Gönderildi: ${r.gonderilen.join(", ").replace(/özet→|yedek→/g,"")}`:"Gönderildi"); }catch(e){ toast(e?.message||"Gönderilemedi"); } finally{ t.disabled=false; t.textContent=old; } },
       "user-add":()=>userForm(),
+      "user-gz":async()=>{ const u=(S.members||[]).find(x=>x.email===d.email); if(!u) return; const g={...(u.gizle||{})}; if(g[d.k]) delete g[d.k]; else g[d.k]=true;
+        t.disabled=true; try{ await window.__members.setGizle(u.email,g); u.gizle=g; renderSheet(); toast(`${u.name||u.email}: kişi uygulamayı bir sonraki açışında geçerli olur`); }catch(e){ t.disabled=false; toast(e?.message||"Kaydedilemedi"); } },
       "user-del":async()=>{ if(t.dataset.armed!=="1"){ t.dataset.armed="1"; t.textContent="Emin misin?"; return; } try{ await window.__members.remove(d.email); toast("Kullanıcı çıkarıldı"); loadMembers(); }catch(e){ toast("Çıkarılamadı."); } },
       "logout":()=>{ const n=window.__queue?.n()||0; if(n) return toast(`${n} kayıt henüz gönderilmedi; internet gelince gönderilsin, sonra çıkış yap.`); return window.__members?.logout(); },
     };
@@ -2928,7 +2933,8 @@ async function init(){
   db=d; user=u; dl=w; assets=a;
   if(!db){ S.conn="Kayıtlara ulaşılamadı. claude.ai hesabınla oturum açıp sayfayı yeniden aç."; render(); return; }
   if(user){ try{ me=await user.id(); const c=await user.can("data.write"); if(c===false) canWrite=false; }catch(e){} }
-  if(STAFF()){ document.body.classList.add("staff"); if(S.cari==="bnk") S.cari="ted"; }
+  for(const [k] of GIZ) if(GZ(k)) document.body.classList.add("g-"+k);
+  if(GZ("banka")&&S.cari==="bnk") S.cari="ted";
   netBar(); for(const ev of ["ud-queue","ud-online","online","offline"]) window.addEventListener(ev,()=>{ netBar(); if(ev==="ud-online") toast("Bağlantı geldi, kayıtlar güncellendi"); });
   window.addEventListener("ud-qsent",e=>toast(`${e.detail.n} bekleyen kayıt gönderildi`));
   window.addEventListener("ud-qfail",e=>toast(`Bekleyen bir kayıt gönderilemedi (${COLN[e.detail.col]||e.detail.col}); yeniden gir. ${e.detail.msg||""}`));

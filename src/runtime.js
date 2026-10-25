@@ -381,12 +381,12 @@ async function boot() {
   try { const r = await sb.auth.mfa?.getAuthenticatorAssuranceLevel?.(); const aal = r?.data; if (aal && aal.nextLevel === "aal2" && aal.currentLevel !== "aal2") return authView("mfa"); } catch (_) {}
   const email = (session.user.email || "").toLowerCase(); rememberEmail(email);
   let mem = null, error = null;
-  for (let i = 0; i < 5 && !mem; i++) { const r = await sb.from("members").select("email,role,name"); if (!r.error) mem = r.data; else { error = r.error; if (isNet(r.error) && await bootOffline()) return; await sleep(700 * (i + 1)); } }
+  for (let i = 0; i < 5 && !mem; i++) { let r = await sb.from("members").select("email,role,name,gizle"); if (r.error && /gizle/.test(r.error.message || "")) r = await sb.from("members").select("email,role,name"); if (!r.error) mem = r.data; else { error = r.error; if (isNet(r.error) && await bootOffline()) return; await sleep(700 * (i + 1)); } }
   if (!mem) return (await bootOffline()) || authView("offline", errText(error));
   const me = mem.find(m => m.email.toLowerCase() === email);
   if (!me) return authView("denied", `<b>${email}</b> hesabı bu deftere ekli değil. Defterin sahibinden, Ayarlar → Kullanıcılar bölümünden bu e-postayı eklemesini iste; sonra sayfayı yenile.`);
   const names = Object.fromEntries(mem.map(m => [m.email.toLowerCase(), m.name || m.email.split("@")[0]]));
-  idb.set("me", { email, role: me.role, name: me.name, names });
+  idb.set("me", { email, role: me.role, name: me.name, gizle: me.gizle || {}, names });
   await startApp(email, me, names, false);
 }
 /* internet yok ama bu telefonda daha önce giriş yapılmış: son saklanan verilerle aç; kayıtlar kuyrukta bekler */
@@ -396,7 +396,7 @@ async function bootOffline() {
   if (!snap?.rows || !m?.email) return false;
   cache.clear(); for (const r of snap.rows) colMap(r.col).set(r.id, r.data);
   window.__offline = { since: snap.at };
-  await startApp(m.email, { role: m.role, name: m.name }, m.names || {}, true);
+  await startApp(m.email, { role: m.role, name: m.name, gizle: m.gizle || {} }, m.names || {}, true);
   return true;
 }
 let live = false;
@@ -431,9 +431,10 @@ async function startApp(email, me, names, offlineMode) {
     profiles: async ids => Object.fromEntries([].concat(ids).map(i => [i, { id: i, name: names[String(i).toLowerCase()] || (String(i).includes("@") ? String(i).split("@")[0] : ""), isMe: i === email }])),
   };
   window.__members = {
-    me: { email, role: me.role, name: me.name },
-    async list() { const { data, error } = await sb.from("members").select("email,role,name,created_at").order("created_at"); if (error) throw error; data.forEach(m => (names[m.email.toLowerCase()] = m.name || m.email.split("@")[0])); return data; },
+    me: { email, role: me.role, name: me.name, gizle: me.gizle || {} },
+    async list() { let { data, error } = await sb.from("members").select("email,role,name,gizle,created_at").order("created_at"); if (error && /gizle/.test(error.message || "")) ({ data, error } = await sb.from("members").select("email,role,name,created_at").order("created_at")); if (error) throw error; data.forEach(m => (names[m.email.toLowerCase()] = m.name || m.email.split("@")[0])); return data; },
     async add(em, role, name) { const { error } = await sb.from("members").insert({ email: em, role, name }); if (error) throw new Error(error.code === "23505" ? "Bu e-posta zaten listede." : error.message); },
+    async setGizle(em, gizle) { const { error } = await sb.from("members").update({ gizle }).eq("email", em); if (error) throw new Error(/gizle/.test(error.message || "") ? "Bu ayar için veritabanı güncellemesi henüz yapılmadı." : error.message); },
     async remove(em) { const { error } = await sb.from("members").delete().eq("email", em); if (error) throw error; },
     async logout() { setRT(""); queue = []; qSave(); await Promise.all([idb.del("snap"), idb.del("me")]); await sb.auth.signOut().catch(() => {}); location.reload(); },
   };
