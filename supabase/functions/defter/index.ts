@@ -145,6 +145,31 @@ const CALC = (() => {
   const landedOf = (ci) => ci?.landed ?? ci?.cu ?? 0;
   // Irak deposundaki malın kg maliyeti: Mersin maliyeti + o sevklere ait navlun / gönderilen kg
   const landedIrakOf = (ci) => landedOf(ci) + (ci?.irakIn > 0 ? (ci.sevkExp || 0) / ci.irakIn : 0);
+  /* Yol süresi (gün): aynı menşe + taşıma + varış yerinden en az 2 tamamlanmış sevkiyat varsa onların gerçek süresinin ortancası,
+     yoksa Ayarlar'daki süre (settings/transit), o da yoksa varsayılan. Elle yazılan varış tarihi her zaman önce gelir. */
+  const DEF_TRANSIT = {
+    gemi: { "Şili": 42, "Arjantin": 40, "Brezilya": 35, "ABD": 32, "Vietnam": 38, "Hindistan": 25, "Çin": 35, "Fildişi Sahili": 28, "İran": 20, "Afganistan": 30, "Özbekistan": 30, "Türkiye": 3 },
+    tir: { "İran": 6, "Türkiye": 4, "Afganistan": 14, "Özbekistan": 12, "Hindistan": 25, "Çin": 25 },
+  };
+  const addDays = (d, n) => { const x = new Date(Date.parse(d + "T12:00:00Z") + Math.round(n) * 864e5); return x.toISOString().slice(0, 10); };
+  const daysBetween = (a, b) => Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 864e5);
+  const trKey = (l) => (l.transport === "tir" ? "tir" : "gemi");
+  function transitDays(D, origin, tr, dest, exceptId) {
+    const k = key(origin);
+    const hist = (D.lots || []).filter((x) => x.id !== exceptId && key(x.origin) === k && trKey(x) === tr && (x.dest === "irak" ? "irak" : "mersin") === dest && x.loadDate && x.arriveDate)
+      .map((x) => daysBetween(x.loadDate, x.arriveDate)).filter((n) => n > 0 && n < 200).sort((a, b) => a - b);
+    if (hist.length >= 2) { const m = hist.length >> 1; return { days: hist.length % 2 ? hist[m] : Math.round((hist[m - 1] + hist[m]) / 2), basis: "gecmis", n: hist.length }; }
+    const set = (D.settings?.transit?.days || {})[tr + "|" + origin];
+    if (+set > 0) return { days: +set, basis: "ayar" };
+    const def = (DEF_TRANSIT[tr] || {})[Object.keys(DEF_TRANSIT[tr] || {}).find((o) => key(o) === k)];
+    return def ? { days: def, basis: "varsayilan" } : null;
+  }
+  function etaOf(D, l) {
+    if (l.eta) return { date: l.eta, auto: false };
+    if (!l.loadDate || !l.origin) return null;
+    const t = transitDays(D, l.origin, trKey(l), l.dest === "irak" ? "irak" : "mersin", l.id);
+    return t ? { date: addDays(l.loadDate, t.days), auto: true, ...t } : null;
+  }
   const costAt = (ci, loc) => (loc === "irak" ? landedIrakOf(ci) : landedOf(ci));
 
   /* kapama: elden USD nakit (out) alıcıya/ortağa verilir, çarşıda dinara bozulur (cRate). Bu dinarın bir kısmı bankaya yatırılıp
@@ -298,7 +323,8 @@ const CALC = (() => {
       const net = ci.kgIn - ci.adjKg - ci.supRetKg - (ci.lostKg || 0); // satılabilir kg: fire, tedarikçiye iade ve konsinyede kaybolan düşülür
       ci.finalCost = net > 0 ? (ci.kgIn * landedOf(ci) + (ci.sevkExp || 0) - (ci.credAmt || 0) + ci.saleExp - ci.saleKur) / net : landedOf(ci);
     }
-    return { item, lot, sale, is, events, unalloc, payUSD };
+    const eta = new Map(); for (const l of lots) if (l.status !== "depoda" && l.status !== "kapandi") { const e = etaOf(D, l); if (e) eta.set(l.id, e); }
+    return { item, lot, sale, is, eta, events, unalloc, payUSD };
   }
 
   /* cari bakiyeler (firma süzgeci dışarıdan): tedarikçi = alış − indirim − ödenen; müşteri = gerçek satış + ona verilen − yerimize ödediği − tahsil + ortak hesap */
@@ -344,7 +370,7 @@ const CALC = (() => {
         "Aşama": H.stage(l), "Varış yeri": isIrakDest(l) ? "Doğrudan Irak deposu" : "Mersin SB",
         "Alım toplam USD": r2(c.costUSD), "İade / indirim USD": r2(c.cred), "Ödenen USD": r2(c.paid), "Kalan borç USD": r2(c.due),
         "Alım kârı USD (satılan kısım)": r2(c.profit), "Bizim kâr payımız USD": l.ortak?.on ? r2(c.ourProfit) : r2(c.profit), "Ortaktan beklenen USD": l.ortak?.on ? r2(c.odue) : "",
-        "Sipariş": l.orderDate || "", "Yükleme": l.loadDate || "", "Tahmini varış": l.eta || "", "Varış": l.arriveDate || "", "Taşıma": l.transport === "tir" ? "TIR" : "Gemi",
+        "Sipariş": l.orderDate || "", "Yükleme": l.loadDate || "", "Tahmini varış": R.eta?.get(l.id)?.date || l.eta || "", "Varış tahmini nasıl": R.eta?.get(l.id) ? (R.eta.get(l.id).auto ? `yükleme + ${R.eta.get(l.id).days} gün` : "elle girildi") : "", "Varış": l.arriveDate || "", "Taşıma": l.transport === "tir" ? "TIR" : "Gemi",
         "Gemi / nakliye firması": l.transport === "tir" ? l.trucker || "" : l.carrier || l.vessel || "", "Konteyner no": (Array.isArray(l.cntNos) ? l.cntNos : [l.cntNos]).filter(Boolean).join(", "),
         "Konşimento": l.bl || "", "Booking": l.booking || "", "TIR plakası": (l.plates || []).join(", "), "CMR": l.cmr || "", "Fatura no": l.invoiceNo || "", "Not": l.note || "" }; }); });
     // satış satırı: kâr o satıra düşen olaylardan (satış, iade, kayıp, satış masrafı payı, kapama payı)
@@ -420,7 +446,7 @@ const CALC = (() => {
     return { ci, lines, totalCost, kgIn: ci.kgIn, fireKg, supRetKg, lostKg, sellKg, perKg: sellKg > 0 ? totalCost / sellKg : null, soldKg, rev, avgPrice: soldKg > 0 ? rev / soldKg : null, stockKg: itemStock(ci) + (ci.konsKg || 0) };
   }
 
-  return { compute, partyBalances, sheets, costBreakdown, kapCalc, kapSum, itemStock, irakLeft, hereLeft, landedOf, landedIrakOf, isCashPay, usd, sum };
+  return { compute, partyBalances, sheets, costBreakdown, transitDays, etaOf, DEF_TRANSIT, kapCalc, kapSum, itemStock, irakLeft, hereLeft, landedOf, landedIrakOf, isCashPay, usd, sum };
 })();
 // </calc.js>
 const usd = (a: any, c: string, k: any) => (c === "TL" || c === "IQD" ? (+k > 0 ? (+a || 0) / +k : 0) : +a || 0);
@@ -443,7 +469,8 @@ function model(rows: { col: string; id: string; data: any }[]) {
   const lots = by("lots").map((l: any) => { if (!Array.isArray(l.items) || !l.items.length) l.items = [{ k: "i1", productId: "", product: l.product || "", model: "", kg: +l.kg || 0, price: +l.price || 0, ppk: +l.ppk || 0 }]; return l; });
   const sales = by("sales").map((s: any) => { if (!Array.isArray(s.items)) s.items = s.lotId ? [{ lotId: s.lotId, ik: "i1", kg: +s.kg || 0, ppk: +s.ppk || 0 }] : []; return s; });
   const pays = by("pays"), exps = by("exps"), trf = by("trf"), kaps = by("kap"), isler = by("isler");
-  const D = { lots, sales, pays, exps, kap: kaps, trf, isler, parties, products };
+  const settings = Object.fromEntries(rows.filter((r) => r.col === "settings").map((r) => [r.id, r.data]));
+  const D = { lots, sales, pays, exps, kap: kaps, trf, isler, parties, products, settings };
   const R = CALC.compute(D);
   const pname = (id?: string, fb?: string) => (id && parties[id]?.name) || fb || "—";
   const prodName = (it: any) => (it?.productId ? products[it.productId]?.name : it?.product) || "—";
@@ -541,12 +568,13 @@ function digestHtml(M: ReturnType<typeof model>) {
       ], [3]);
     }
     // yoldaki mallar
-    const coming = lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && l.eta && daysTo(l.eta) <= 21).sort((a: any, b: any) => a.eta.localeCompare(b.eta));
-    const noEta = lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && !l.eta);
+    const etaD = (l: any) => M.R.eta.get(l.id)?.date || "";
+    const coming = lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && etaD(l) && daysTo(etaD(l)) <= 21).sort((a: any, b: any) => etaD(a).localeCompare(etaD(b)));
+    const noEta = lots.filter((l: any) => (l.status === "yuklendi" || l.status === "yolda") && !etaD(l));
     const via = (l: any) => esc((l.transport === "tir" ? ["TIR", l.trucker, ...(l.plates || [])] : [l.carrier]).filter(Boolean).join(" · ") || "—") + (l.dest === "irak" ? " → Irak deposu" : "");
     h += `<h2 style="${css.h2}">Yoldaki mallar</h2>`;
     h += coming.length || noEta.length ? tbl(["Alım", "Gemi / nakliye", "Tahmini varış", ""], [
-      ...coming.map((l: any) => { const d = daysTo(l.eta); return [lotLabel(l), via(l), fd(l.eta), d < 0 ? `<b style="color:#B3261E">${-d} gün gecikti</b>` : d === 0 ? "<b>bugün</b>" : `${d} gün`]; }),
+      ...coming.map((l: any) => { const d = daysTo(etaD(l)); return [lotLabel(l), via(l), (M.R.eta.get(l.id)?.auto ? "~" : "") + fd(etaD(l)), d < 0 ? `<b style="color:#B3261E">${-d} gün gecikti</b>` : d === 0 ? "<b>bugün</b>" : `${d} gün`]; }),
       ...noEta.map((l: any) => [lotLabel(l), via(l), "girilmedi", ST[l.status]]),
     ], [3]) : `<p style="${css.muted}">Yolda mal yok.</p>`;
     // stok: bizde (Mersin SB, Irak deposu), ortakta, konsinyede — ürünler arası toplam yok
@@ -876,12 +904,13 @@ async function doBildirim() {
   const alerts: { k: string; pref: string; title: string; body: string; url: string }[] = [];
   const lotLabel = (l: any) => `${l.code} ${[...new Set(l.items.map((it: any) => M.prodName(it)))].join(", ")}`;
   for (const l of M.lots) {
-    if ((l.status === "yuklendi" || l.status === "yolda") && l.eta) {
-      const d = daysTo(l.eta);
+    const E = M.R.eta.get(l.id);
+    if ((l.status === "yuklendi" || l.status === "yolda") && E) {
+      const d = daysTo(E.date);
       const tir = l.transport === "tir", w = tir ? "TIR" : "Konteyner", via = tir ? [l.trucker, ...(l.plates || [])].filter(Boolean).join(" · ") : l.carrier;
       const yer = l.dest === "irak" ? "Irak deposunda" : "Mersin'de";
-      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: d === 0 ? `${w} bugün ${yer}` : `${w} ${d === 1 ? "yarın" : "3 gün sonra"} ${yer}`, body: `${lotLabel(l)}${via ? " · " + via : ""}`, url: `./#lot=${l.id}` });
-      else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `Varış ${-d} gün gecikti`, body: `${lotLabel(l)} · ${tir ? "nakliyeciden" : "gemi firmasından"} kontrol et`, url: `./#lot=${l.id}` });
+      if (d === 3 || d === 1 || d === 0) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `${E.auto ? "Tahmini: " : ""}${d === 0 ? `${w} bugün ${yer}` : `${w} ${d === 1 ? "yarın" : "3 gün sonra"} ${yer}`}`, body: `${lotLabel(l)}${via ? " · " + via : ""}${E.auto ? ` · yükleme + ${E.days} gün` : ""}`, url: `./#lot=${l.id}` });
+      else if (d < 0 && (-d) % 3 === 1) alerts.push({ k: `eta:${l.id}:${d}`, pref: "eta", title: `${E.auto ? "Tahmini varış" : "Varış"} ${-d} gün geçti`, body: `${lotLabel(l)} · ${tir ? "nakliyeciden" : "gemi firmasından"} kontrol et; geldiyse "Depoda" işaretle`, url: `./#lot=${l.id}` });
     }
     const c = M.lotC.get(l.id);
     if (l.payDue && c && c.due > 1) {

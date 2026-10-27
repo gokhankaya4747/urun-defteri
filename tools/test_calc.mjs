@@ -181,6 +181,19 @@ T("elden iş: verilen sermaye + kâr payımız döner; kâr satılınca yazılı
   const PB = CALC.partyBalances(D, R, () => true); const p = PB.cus.find((r) => r.id === "p9"); near(p.a - p.p, c.due, "cari");
 });
 
+T("tahmini varış: elle girilen önce, yoksa geçmiş ortası, yoksa ayar/varsayılan", () => {
+  const D = base(); D.settings = {};
+  const mk = (id, load, arr) => ({ id, code: id, firmId: "a", origin: "Şili", transport: "gemi", dest: "mersin", status: "depoda", loadDate: load, arriveDate: arr, items: [] });
+  const yeni = { id: "y", code: "y", firmId: "a", origin: "Şili", transport: "gemi", dest: "mersin", status: "yuklendi", loadDate: "2026-11-01", items: [] };
+  D.lots.push(yeni);
+  let e = CALC.etaOf(D, yeni); assert.equal(e.basis, "varsayilan"); assert.equal(e.date, "2026-12-13", "1 Kasım + 42 gün");
+  D.settings.transit = { days: { "gemi|Şili": 45 } }; e = CALC.etaOf(D, yeni); assert.equal(e.basis, "ayar"); assert.equal(e.date, "2026-12-16");
+  D.lots.push(mk("h1", "2026-01-01", "2026-02-08"), mk("h2", "2026-03-01", "2026-04-12")); // 38 ve 42 gün
+  e = CALC.etaOf(D, yeni); assert.equal(e.basis, "gecmis"); assert.equal(e.days, 40); assert.equal(e.n, 2);
+  yeni.eta = "2026-12-20"; e = CALC.etaOf(D, yeni); assert.equal(e.auto, false); assert.equal(e.date, "2026-12-20");
+  yeni.eta = ""; yeni.loadDate = "2026-11-10"; assert.equal(CALC.etaOf(D, yeni).date, "2026-12-20", "yükleme kayınca varış da kayar");
+});
+
 T("Excel sayfaları = olaylar (Kâr hareketleri toplamı)", () => {
   const D = base(), R = CALC.compute(D);
   const SH = CALC.sheets(D, R, { firm: (x) => x, party: (i, f) => f || i, prod: (it) => it.productId, stage: (l) => l.status });
