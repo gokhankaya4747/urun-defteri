@@ -263,10 +263,34 @@ function pendingWork(){
 }
 function transitHTML(){
   const ls=S.lots.filter(l=>inFirm(l)&&STI[l.status]<STI.depoda).map(l=>({l,e:etaI(l)})).filter(x=>x.e&&(STI[x.l.status]>=STI.yuklendi||x.l.loadDate)).sort((a,b)=>String(a.e.date).localeCompare(String(b.e.date)));
-  if(!ls.length) return "";
-  return `<div class="dsec pendsec"><div class="h"><h4>Yoldaki mallar</h4></div><div class="panel rows">${ls.map(({l,e})=>{ const d=etaDays(e);
+  if(!ls.length) return S.lots.some(l=>inFirm(l)&&STI[l.status]<STI.depoda)?`<div class="dsec pendsec"><div class="h"><h4>Yoldaki mallar</h4><button class="btn sm" type="button" data-act="arrivals">Tüm varışlar ›</button></div></div>`:"";
+  return `<div class="dsec pendsec"><div class="h"><h4>Yoldaki mallar</h4><button class="btn sm" type="button" data-act="arrivals">Tüm varışlar ›</button></div><div class="panel rows">${ls.map(({l,e})=>{ const d=etaDays(e);
     return `<button type="button" class="row" data-lot="${l.id}"><span class="typeic tir">${isTir(l)?"TIR":"GEMİ"}</span><span class="main"><div class="t">${esc(lotProducts(l))} · ${esc(l.origin||lotSupplier(l))}</div><div class="sub">${STI[l.status]<STI.yuklendi?`yükleme ${fds(l.loadDate)} (planlanan) · `:`yüklendi ${fds(l.loadDate)} · `}varış ${e.auto?"~":""}${fd(e.date)}${e.auto?` · ${e.days} gün`:""}${isIrakDest(l)?" · Irak deposu":""}</div></span>
       <span class="end"><div class="a" style="color:${d<0?"var(--bad)":d<=3?"var(--warn)":""}">${d<0?`${-d} gün gecikti`:d===0?"bugün":`${d} gün`}</div><div class="b">${e.auto?"tahmini":"gemi firması"}</div></span></button>`; }).join("")}</div></div>`;
+}
+/* Varışlar: henüz gelmemiş bütün mallar, tahmini varışa göre aylara ayrılmış; altta son gelenler (tahmin ne kadar tuttu) */
+function sArrivals(){
+  const lots=S.lots.filter(l=>inFirm(l)&&STI[l.status]<STI.depoda);
+  const withE=lots.map(l=>({l,e:etaI(l)})).filter(x=>x.e).sort((a,b)=>String(a.e.date).localeCompare(String(b.e.date)));
+  const noE=lots.filter(l=>!etaI(l));
+  const kgTxt=l=>l.items.map(it=>`${esc(itemLabel(it))} <b>${nf0.format(+it.kg||0)} kg</b>`).join(" · ");
+  const row=(l,e)=>{ const d=e?etaDays(e):null;
+    return `<button type="button" class="row arr" data-lot="${l.id}"><span class="typeic tir">${isTir(l)?"TIR":"GEMİ"}</span><span class="main"><div class="t">${kgTxt(l)}</div>
+      <div class="sub">${esc(l.origin||"menşe yok")} · ${esc(lotSupplier(l))} · ${esc(stT(l,l.status))}${l.loadDate?` · yükleme ${fds(l.loadDate)}${STI[l.status]<STI.yuklendi?" (planlanan)":""}`:""}${isIrakDest(l)?" · → Irak deposu":""} · ${l.ortak?.on?"ortak":esc(firmName(l.firmId))}</div>
+      ${e?`<div class="sub">varış <b>${e.auto?"~":""}${fd(e.date)}</b> ${e.auto?`<span class="muted">(yükleme + ${e.days} gün, ${basisTxt(e)})</span>`:`<span class="muted">(gemi firması)</span>`}</div>`:`<div class="sub" style="color:var(--warn)">${!l.origin?"Menşe":"Yükleme tarihi"} yazılmamış; alımı düzenleyip ekle</div>`}</span>
+      ${e?`<span class="end"><div class="a" style="color:${d<0?"var(--bad)":d<=3?"var(--warn)":""}">${d<0?`${-d} gün gecikti`:d===0?"bugün":`${d} gün`}</div><div class="b">${e.auto?"tahmini":"kesin"}</div></span>`:""}</button>`; };
+  const late=withE.filter(x=>etaDays(x.e)<0), months=new Map();
+  for(const x of withE.filter(x=>etaDays(x.e)>=0)){ const m=String(x.e.date).slice(0,7); if(!months.has(m)) months.set(m,[]); months.get(m).push(x); }
+  const mName=m=>`${MONTHS_TR[+m.slice(5,7)-1]} ${m.slice(0,4)}`;
+  const recent=S.lots.filter(l=>inFirm(l)&&l.arriveDate&&l.loadDate&&daysSince(l.arriveDate)<=60).sort((a,b)=>String(b.arriveDate).localeCompare(String(a.arriveDate))).slice(0,10);
+  let body=!lots.length?`<div class="empty">Yolda ya da siparişte mal yok.</div>`:"";
+  if(late.length) body+=`<h3 class="acch" style="color:var(--bad)">Gecikenler (geldiyse “Depoda” işaretle)</h3><div class="panel rows">${late.map(x=>row(x.l,x.e)).join("")}</div>`;
+  for(const [m,xs] of months) body+=`<h3 class="acch">${mName(m)} <span class="muted" style="font-weight:400">· ${xs.length} alım</span></h3><div class="panel rows">${xs.map(x=>row(x.l,x.e)).join("")}</div>`;
+  if(noE.length) body+=`<h3 class="acch">Varış tarihi hesaplanamayanlar</h3><div class="panel rows">${noE.map(l=>row(l,null)).join("")}</div>`;
+  if(recent.length) body+=`<details class="dmore"><summary>Son gelenler · tahmin ne kadar tuttu</summary><div class="panel rows">${recent.map(l=>{ const real=Math.round((Date.parse(l.arriveDate)-Date.parse(l.loadDate))/864e5);
+    return `<button type="button" class="row" data-lot="${l.id}"><span class="main"><div class="t">${esc(lotProducts(l))} · ${esc(l.origin||"")}</div><div class="sub">yükleme ${fds(l.loadDate)} → geldi ${fds(l.arriveDate)}</div></span><span class="end"><div class="a">${real} gün</div><div class="b">gerçek yol süresi</div></span></button>`; }).join("")}</div></details>`;
+  body+=`<p class="muted foot-note">“~” işaretli tarihler yükleme tarihi + ülkenin yol süresidir; sistem o ülkeden gelen her yeni malla bu süreyi kendi geçmişine göre düzeltir. Süreleri Ayarlar → Yol süreleri'nden değiştirebilirsin.</p>`;
+  return {title:"Varışlar",body};
 }
 function pendingHTML(){
   const {kap,kons}=pendingWork(); if(!kap.length&&!kons.length) return "";
@@ -328,7 +352,7 @@ function vAlimlar(){
   const lots=S.lots.filter(inFirm).filter(l=>S.prod==="all"||lotHasProd(l,S.prod)).filter(l=>lotMatches(l,S.pq));
   const cnt=k=>lots.filter(l=>l.status===k).length;
   const stages = S.stage==="all" ? ST : ST.filter(s=>s.k===S.stage);
-  let h=`<div class="vh"><h2>Alımlar</h2><input class="search" id="pq" type="search" placeholder="Ara: ürün, kod, tedarikçi, konteyner no…" value="${esc(S.pq)}">${canWrite&&db?`<button class="btn pri fabdup" type="button" data-act="new-lot">+ Yeni alım</button>`:""}</div>`;
+  let h=`<div class="vh"><h2>Alımlar</h2><input class="search" id="pq" type="search" placeholder="Ara: ürün, kod, tedarikçi, konteyner no…" value="${esc(S.pq)}"><button class="btn" type="button" data-act="arrivals">Varışlar</button>${canWrite&&db?`<button class="btn pri fabdup" type="button" data-act="new-lot">+ Yeni alım</button>`:""}</div>`;
   h+=prodChips();
   h+=`<div class="chips" role="group" aria-label="Aşama"><button type="button" class="chip" data-stage="all" aria-pressed="${S.stage==="all"}">Tüm aşamalar <span class="c">${lots.length}</span></button>${ST.map(s=>`<button type="button" class="chip" data-stage="${s.k}" aria-pressed="${S.stage===s.k}"><span class="dot" style="background:var(--st-${s.k})"></span>${s.s} <span class="c">${cnt(s.k)}</span></button>`).join("")}</div>`;
   if(!S.lots.length) return h+`<div class="panel"><div class="empty">Henüz alım yok. Yurtdışından sipariş verdiğinde <b>+ Yeni alım</b> ile gir. Bir konteynerde birden fazla model varsa her birini ayrı satır olarak fiyatıyla yaz.</div></div>`;
@@ -462,7 +486,7 @@ function renderSheet(){
   if(!top){ root.innerHTML=""; root.dataset.k=""; document.body.style.overflow=""; return; }
   document.body.style.overflow="hidden";
   const R={is:()=>sIs(top),lot:()=>sLot(top.id),sale:()=>sSale(top.id),pay:()=>sPay(top.id),exp:()=>sExp(top.id),party:()=>sParty(top.pk,top.dir),prod:()=>sProd(top.id),
-    choose:sChoose,settings:sSettings,setprods:sSetProds,users:sUsers,mail:sMail,notify:()=>sNotify(top),delask:()=>sDelAsk(top),hist:()=>sHist(top),costb:()=>sCostB(top),mfa:()=>sMfa(top),ask:()=>sAsk(top),acct:()=>sAcct(top),beyan:()=>sBeyan(top),pdf:()=>sPdf(top),firms:sFirms,setparties:()=>sSetParties(top.kind),doc:()=>sDoc(top),form:()=>formR(top),scan:()=>sScan(top)};
+    choose:sChoose,settings:sSettings,setprods:sSetProds,users:sUsers,mail:sMail,notify:()=>sNotify(top),delask:()=>sDelAsk(top),arrivals:sArrivals,hist:()=>sHist(top),costb:()=>sCostB(top),mfa:()=>sMfa(top),ask:()=>sAsk(top),acct:()=>sAcct(top),beyan:()=>sBeyan(top),pdf:()=>sPdf(top),firms:sFirms,setparties:()=>sSetParties(top.kind),doc:()=>sDoc(top),form:()=>formR(top),scan:()=>sScan(top)};
   let r=(R[top.type]||(()=>null))();
   if(!r) r=loadingR("");
   const k=top.type+"|"+(top.id||top.pk||top.kind||"")+"|"+S.stack.length;
@@ -3086,6 +3110,7 @@ document.addEventListener("click",e=>{
         t.disabled=true; try{ await window.__mfa.verify(top.enr.id,code); top.enr=null; top.list=null; toast("İki adımlı giriş açıldı"); mfaLoad(top); }catch(e){ t.disabled=false; toast(/invalid|expired|code/i.test(e?.message||"")?"Kod yanlış; uygulamadaki güncel kodu yaz.":(e?.message||"Doğrulanamadı")); } },
       "mfa-off":()=>armDel(t,async()=>{ await window.__mfa.remove(t.dataset.id); const top=S.stack[S.stack.length-1]; top.list=null; mfaLoad(top); }),
       "q-flush":()=>{ window.__queue?.flush().then(netBar); },
+      "arrivals":()=>openSheet({type:"arrivals"}),
       "bal-open":()=>openingForm(), "set-transit":()=>transitForm(),
       "new-is":()=>isForm(null), "is-open":()=>openSheet({type:"is",id:d.id}), "is-edit":()=>isForm(isById(d.id)), "is-sat":()=>isSatForm(d.id), "is-ver":()=>isMoneyForm(d.id,"ver"), "is-don":()=>isMoneyForm(d.id,"don"),
       "sat-tab":()=>{ S.satv=d.k; S.market="all"; render(); },
