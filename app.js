@@ -63,6 +63,7 @@ const VIEWS = [
   {k:"alimlar", t:"Alımlar", ic:'<rect x="2" y="6" width="20" height="13" rx="1.5"/><path d="M7 9v7M12 9v7M17 9v7"/>'},
   {k:"satislar", t:"Satışlar", ic:'<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>'},
   {k:"cari", t:"Cari", ic:'<path d="M4 7h16M4 12h16M4 17h10"/>'},
+  {k:"banka", t:"Banka", ic:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20h18"/>'},
   {k:"rapor", t:"Rapor", ic:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'},
   {k:"arsiv", t:"Arşiv", ic:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/>'},
 ];
@@ -213,7 +214,7 @@ function prodList(){
 
 /* ---------- çizim ---------- */
 function renderChrome(){
-  const VS=VIEWS.filter(v=>!(noRapor()&&v.k==="rapor")); if(noRapor()&&S.view==="rapor") S.view="urunler";
+  const VS=VIEWS.filter(v=>!(noRapor()&&v.k==="rapor")&&!(GZ("banka")&&v.k==="banka")); if((noRapor()&&S.view==="rapor")||(GZ("banka")&&S.view==="banka")) S.view="urunler";
   document.getElementById("tabs").innerHTML = VS.map(v=>`<button type="button" data-view="${v.k}" ${S.view===v.k?'aria-current="page"':""}>${v.t}</button>`).join("");
   document.getElementById("btabs").innerHTML = VS.map(v=>`<button type="button" data-view="${v.k}" ${S.view===v.k?'aria-current="page"':""}>${svg(v.ic,22)}${v.t}</button>`).join("");
   document.getElementById("firmsel").innerHTML = [["all","Tümü"],["a",firmName("a")],["b",firmName("b")],["x","Elden"]].map(([k,t])=>
@@ -227,7 +228,7 @@ function render(){
   let h="";
   if(S.conn) h+=`<div class="conn">${esc(S.conn)}</div>`;
   if(hasEx()) h+=`<div class="banner"><b>Örnek kayıtlar</b><span>Ekrandakiler deneme amaçlı örnek kayıtlar; kendi kayıtlarına başlamadan önce sil.</span>${canWrite?`<button class="btn sm" type="button" data-act="clear-ex">Örnekleri sil</button>`:""}</div>`;
-  h+=({urunler:vUrunler,alimlar:vAlimlar,satislar:vSatislar,cari:vCari,rapor:vRapor,arsiv:vArsiv}[S.view]||vUrunler)();
+  h+=({urunler:vUrunler,alimlar:vAlimlar,satislar:vSatislar,cari:vCari,banka:vBankaView,rapor:vRapor,arsiv:vArsiv}[S.view]||vUrunler)();
   m.innerHTML=h; labelTables(m);
   fillNames(m); window.__blobHook?.(m);
   const top=S.stack[S.stack.length-1];
@@ -402,10 +403,10 @@ function vSatislar(){
 /* --- Cari --- */
 function cariData(){ return CALC.partyBalances(S,{lot:C.lot,sale:C.sale,payUSD:C.payUSD},inFirm); }
 function vCari(){
+  if(S.cari==="bnk") S.cari="ted"; // banka/kasa artık ana sekme
   let h=`<div class="vh"><h2>Cari</h2>${canWrite&&db?(S.cari==="mal"?"":S.cari==="bnk"?`<button class="btn" type="button" data-act="trf-new">Transfer</button><button class="btn" type="button" data-act="bal-open">Açılış bakiyeleri</button><button class="btn pri" type="button" data-act="bal-new">Bakiye gir</button>`:S.cari==="mas"?`<button class="btn pri" type="button" data-act="new-exp">+ Masraf</button>`:S.cari==="ted"?`<button class="btn" type="button" data-act="new-party" data-kind="supplier">+ Tedarikçi</button><button class="btn pri" type="button" data-act="new-pay-out">+ Ödeme</button>`:S.cari==="mus"?`<button class="btn" type="button" data-act="new-party" data-kind="customer">+ Müşteri</button><button class="btn pri" type="button" data-act="new-pay-in">+ Tahsilat</button>`:`<button class="btn pri" type="button" data-act="new-pay">+ Ödeme / tahsilat</button>`):""}</div>`;
-  h+=`<div class="seg tabseg" role="radiogroup" style="max-width:720px">${[["ted","Tedarikçiler"],["mus","Müşteriler"],["mal","Mal kimde"],["mas","Masraflar"],["hep","Tüm ödemeler"],["bnk","Banka / kasa"]].filter(([k])=>!(GZ("banka")&&k==="bnk")).map(([k,t])=>`<button type="button" role="radio" data-cari="${k}" aria-checked="${S.cari===k}">${t}</button>`).join("")}</div>`;
+  h+=`<div class="seg tabseg" role="radiogroup" style="max-width:720px">${[["ted","Tedarikçiler"],["mus","Müşteriler"],["mal","Mal kimde"],["mas","Masraflar"],["hep","Tüm ödemeler"]].map(([k,t])=>`<button type="button" role="radio" data-cari="${k}" aria-checked="${S.cari===k}">${t}</button>`).join("")}</div>`;
   if(S.cari==="mas") return h+vMasraf();
-  if(S.cari==="bnk"&&!GZ("banka")) return h+vBanka();
   if(S.cari==="mal") return h+vMalKimde();
   if(S.cari==="hep"){
     const ps=S.pays.filter(inFirm).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
@@ -2330,6 +2331,14 @@ function accounts(f=BANK_FIRM){
     const after=cp?mv.filter(x=>String(x.date)>String(cp.date)):mv; const bal=(cp?+cp.amt:0)+sum(after,x=>x.amt);
     return {k,cp,cps,mv,after,bal}; }).sort((a,b)=>a.k.localeCompare(b.k,"tr"));
   return {list:out,none};
+}
+/* Banka ana sekmesi: firma firma hesaplar, üstte toplamlar */
+function vBankaView(){
+  if(GZ("banka")) return `<div class="panel"><div class="empty">Banka ve kasa senin için kapalı.</div></div>`;
+  let h=`<div class="vh"><h2>Banka ve kasa</h2>${canWrite&&db?`<button class="btn" type="button" data-act="trf-new">Transfer</button><button class="btn" type="button" data-act="bal-open">Açılış bakiyeleri</button><button class="btn pri" type="button" data-act="bal-new">Bakiye gir</button>`:""}</div>`;
+  const tot=BANK_FIRMS.filter(f=>S.firm==="all"||S.firm===f).map(f=>{ const L=accounts(f).list; return {f,usd:sum(L.filter(a=>!a.k.endsWith("|TL")),a=>a.bal),tl:sum(L.filter(a=>a.k.endsWith("|TL")),a=>a.bal),n:L.length}; }).filter(x=>x.n);
+  if(tot.length) h+=`<div class="money rpm">${tot.map(x=>`<div><div class="l">${x.f==="x"?"Elden kasa":esc(firmName(x.f))}</div><div class="v">${usdf(x.usd)}</div>${Math.abs(x.tl)>0.5?`<div class="muted" style="font-size:13px">${moneyf(x.tl,"TL")}</div>`:""}</div>`).join("")}</div>`;
+  return h+vBanka();
 }
 function vBanka(){
   const block=f=>{ const {list,none}=accounts(f); const cur=c=>c.k.endsWith("|TL")?"TL":"USD";
