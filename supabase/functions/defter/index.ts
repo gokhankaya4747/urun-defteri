@@ -229,16 +229,18 @@ const CALC = (() => {
       let tot = 0, kg = 0, rev = 0, pendKg = 0, offRet = 0, olot = null; const lines = [];
       const rets = s.ret || [];
       s.items.forEach((ln, i) => {
-        const amt = (+ln.kg || 0) * (+ln.ppk || 0); tot += amt; kg += +ln.kg || 0;
+        // normal satışta faturaya farklı fiyat yazılabilir (invPpk): resmi taraf fatura fiyatından, kâr ve alacak gerçek fiyattan (ppk)
+        const invP = !s.realLater && +ln.invPpk > 0 ? +ln.invPpk : +ln.ppk || 0;
+        const amt = (+ln.kg || 0) * invP; tot += amt; kg += +ln.kg || 0;
         const ci = item.get(ln.lotId + "|" + ln.ik); if (ci?.lot.ortak?.on) olot = ci.lot;
         const myRet = rets.filter((r) => r.i === i), iade = sum(myRet.filter((r) => r.kind !== "kayip"), (r) => +r.kg || 0), lost = sum(myRet.filter((r) => r.kind === "kayip"), (r) => +r.kg || 0);
         const consumed = Math.max(0, (+ln.kg || 0) - iade);
-        offRet += sum(myRet.filter((r) => r.kind !== "kayip" && r.off), (r) => (+r.kg || 0) * (+ln.ppk || 0)); // resmi iade faturası kesilen kısım
+        offRet += sum(myRet.filter((r) => r.kind !== "kayip" && r.off), (r) => (+r.kg || 0) * invP); // resmi iade faturası kesilen kısım
         let soldKg, realKg = 0, pend = 0, realAmt;
         if (s.realLater) { const rs = (s.real || []).flatMap((r) => (r.lines || []).filter((x) => x.i === i).map((x) => ({ ...x, date: r.date }))); realKg = sum(rs, (x) => +x.kg || 0); pend = Math.max(0, consumed - realKg - lost); soldKg = realKg; realAmt = sum(rs, (x) => (+x.kg || 0) * (+x.ppk || 0));
           if (ci) for (const x of rs) ev({ kind: "sale", date: x.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +x.kg || 0, rev: usd((+x.kg || 0) * (+x.ppk || 0), s.cur, s.kur), cogs: (+x.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market }); }
         else { soldKg = consumed; realAmt = consumed * (+ln.ppk || 0);
-          if (ci) { ev({ kind: "sale", date: s.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +ln.kg || 0, rev: usd(amt, s.cur, s.kur), cogs: (+ln.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market });
+          if (ci) { ev({ kind: "sale", date: s.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +ln.kg || 0, rev: usd((+ln.kg || 0) * (+ln.ppk || 0), s.cur, s.kur), cogs: (+ln.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market });
             for (const r of myRet.filter((r) => r.kind !== "kayip")) ev({ kind: "ret", date: r.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: -(+r.kg || 0), rev: -usd((+r.kg || 0) * (+ln.ppk || 0), s.cur, s.kur), cogs: -(+r.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market }); } }
         if (ci) { ci.lostKg = (ci.lostKg || 0) + lost; for (const r of myRet.filter((r) => r.kind === "kayip")) ev({ kind: "lost", date: r.date, firm: s.firmId, saleId: s.id, li: i, lotId: ci.lot.id, ci, kg: +r.kg || 0, loss: (+r.kg || 0) * costAt(ci, ln.loc), share: shareOf(ci.lot), market: s.market });
           ci.consumed += consumed; ci.soldKg += soldKg; ci.konsKg += pend; if (ln.loc === "irak") ci.soldIrak += consumed; }
@@ -379,7 +381,7 @@ const CALC = (() => {
       const profit = g("rev") - g("cogs") - g("exp") + g("kur") - g("kes") - g("loss");
       return { "Tarih": s.date, "Firma": H.firm(s.firmId), "Müşteri": cust(s), "Pazar": MKT[s.market] || s.market || "", "Ortak alım": c.olot?.code || "", "Konsinye": s.realLater ? "Evet" : "",
         "Alım": ci?.lot.code || "", "Stok yeri": L.ln.loc === "irak" || isIrakDest(ci?.lot) ? "Irak deposu" : "Mersin SB", "Ürün": ci ? H.prod(ci.it) : "", "Model": ci?.it.model || "",
-        "Faturadaki kg": +L.ln.kg || 0, "Fatura fiyatı /kg": L.ln.ppk, "Para birimi": s.cur, "Kur": s.cur === "TL" ? s.kur : "", "Fatura tutarı USD": r2(L.offUSD),
+        "Faturadaki kg": +L.ln.kg || 0, "Fatura fiyatı /kg": !s.realLater && +L.ln.invPpk > 0 ? +L.ln.invPpk : L.ln.ppk, "Gerçek fiyat /kg": s.realLater ? (L.soldKg ? r4(L.amtUSD / L.soldKg) : "") : L.ln.ppk, "Para birimi": s.cur, "Kur": s.cur === "TL" ? s.kur : "", "Fatura tutarı USD": r2(L.offUSD),
         "Satılan kg": r2(L.soldKg), "İade kg": r2(L.iade), "Kayıp kg": r2(L.lost), "Konsinyede bekleyen kg": r2(L.pend), "Gerçek satış USD": r2(L.amtUSD),
         "Malın maliyeti USD": r2(g("cogs")), "Satış masrafı payı USD": r2(g("exp")), "Kur farkı payı USD": r2(g("kur") - g("kes")), "Kayıp USD": r2(g("loss")), "Kâr USD": r2(profit),
         "Belge no": s.docNo || s.ciNo || "", "Plaka": s.plate || "", "Not": s.note || "" }; }); });

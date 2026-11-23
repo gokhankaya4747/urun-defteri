@@ -194,6 +194,15 @@ T("tahmini varış: elle girilen önce, yoksa geçmiş ortası, yoksa ayar/varsa
   yeni.eta = ""; yeni.loadDate = "2026-11-10"; assert.equal(CALC.etaOf(D, yeni).date, "2026-12-20", "yükleme kayınca varış da kayar");
 });
 
+T("normal satışta farklı fatura fiyatı: kâr ve alacak gerçek fiyattan, resmi taraf fatura fiyatından", () => {
+  const D = base(); const s = sale(D, "ex-sa1"); s.items[0] = { ...s.items[0], price: 8.30, ppk: 8.30, invPrice: 7.95, invPpk: 7.95 };
+  const R = CALC.compute(D), c = R.sale.get("ex-sa1");
+  near(c.revUSD, 6000 * 8.30 + 3000 * 9.7, "gerçek satış"); near(c.totUSD, 6000 * 7.95 + 3000 * 9.7, "fatura tutarı");
+  near(c.due, 6000 * 8.30 + 29100 - 50000, "alacak gerçek fiyattan"); near(c.offDue, 6000 * 7.95 + 29100, "resmi kalan fatura fiyatından");
+  const rev = R.events.filter((e) => e.saleId === "ex-sa1" && e.kind === "sale").reduce((a, e) => a + e.rev, 0); near(rev, 6000 * 8.30 + 29100, "kâr gelirinde gerçek fiyat");
+  invariants(D, R, "fatura-farkı");
+});
+
 T("Excel sayfaları = olaylar (Kâr hareketleri toplamı)", () => {
   const D = base(), R = CALC.compute(D);
   const SH = CALC.sheets(D, R, { firm: (x) => x, party: (i, f) => f || i, prod: (it) => it.productId, stage: (l) => l.status });
