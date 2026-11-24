@@ -262,12 +262,18 @@ function pendingWork(){
   const kons=S.sales.filter(s=>inFirm(s)&&s.realLater&&SC(s).pendKg>0.5).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   return {kap,kons};
 }
+const outShipments = () => S.sales.filter(s=>inFirm(s)&&s.ship&&s.ship.status!=="teslim").map(s=>({s,e:shipEta(s)})).sort((a,b)=>String(a.e?.date||"9").localeCompare(String(b.e?.date||"9")));
+function shipRow({s,e}){ const d=e?etaDays(e):null;
+  return `<button type="button" class="row arr" data-sale="${s.id}"><span class="typeic s">${s.ship.transport==="gemi"?"GEMİ":"TIR"}</span><span class="main"><div class="t">→ ${esc(saleCustomer(s))} · ${esc(saleLinesTxt(s))}</div><div class="sub">${shipName(s.ship.status)}${s.ship.loadDate?` · yüklendi ${fds(s.ship.loadDate)}`:""}${(s.ship.plates||[]).length?` · ${esc(s.ship.plates.join(", "))}`:""}${e?` · teslim ${e.auto?"~":""}${fd(e.date)}`:" · tarih yok"}</div></span>
+    ${e?`<span class="end"><div class="a" style="color:${d<0?"var(--bad)":d<=1?"var(--warn)":""}">${d<0?`${-d} gün gecikti`:d===0?"bugün":`${d} gün`}</div><div class="b">${e.auto?"tahmini":"kesin"}</div></span>`:""}</button>`; }
 function transitHTML(){
   const ls=S.lots.filter(l=>inFirm(l)&&STI[l.status]<STI.depoda).map(l=>({l,e:etaI(l)})).filter(x=>x.e&&(STI[x.l.status]>=STI.yuklendi||x.l.loadDate)).sort((a,b)=>String(a.e.date).localeCompare(String(b.e.date)));
+  const outs=outShipments().filter(x=>x.s.ship.status!=="hazir"||x.e);
+  if(!ls.length&&outs.length) return `<div class="dsec pendsec"><div class="h"><h4>Yoldaki mallar</h4><button class="btn sm" type="button" data-act="arrivals">Tüm varışlar ›</button></div><div class="panel rows">${outs.map(shipRow).join("")}</div></div>`;
   if(!ls.length) return S.lots.some(l=>inFirm(l)&&STI[l.status]<STI.depoda)?`<div class="dsec pendsec"><div class="h"><h4>Yoldaki mallar</h4><button class="btn sm" type="button" data-act="arrivals">Tüm varışlar ›</button></div></div>`:"";
   return `<div class="dsec pendsec"><div class="h"><h4>Yoldaki mallar</h4><button class="btn sm" type="button" data-act="arrivals">Tüm varışlar ›</button></div><div class="panel rows">${ls.map(({l,e})=>{ const d=etaDays(e);
     return `<button type="button" class="row" data-lot="${l.id}"><span class="typeic tir">${isTir(l)?"TIR":"GEMİ"}</span><span class="main"><div class="t">${esc(lotProducts(l))} · ${esc(l.origin||lotSupplier(l))}</div><div class="sub">${STI[l.status]<STI.yuklendi?`yükleme ${fds(l.loadDate)} (planlanan) · `:`yüklendi ${fds(l.loadDate)} · `}varış ${e.auto?"~":""}${fd(e.date)}${e.auto?` · ${e.days} gün`:""}${isIrakDest(l)?" · Irak deposu":""}</div></span>
-      <span class="end"><div class="a" style="color:${d<0?"var(--bad)":d<=3?"var(--warn)":""}">${d<0?`${-d} gün gecikti`:d===0?"bugün":`${d} gün`}</div><div class="b">${e.auto?"tahmini":"gemi firması"}</div></span></button>`; }).join("")}</div></div>`;
+      <span class="end"><div class="a" style="color:${d<0?"var(--bad)":d<=3?"var(--warn)":""}">${d<0?`${-d} gün gecikti`:d===0?"bugün":`${d} gün`}</div><div class="b">${e.auto?"tahmini":"gemi firması"}</div></span></button>`; }).join("")}${outs.map(shipRow).join("")}</div></div>`;
 }
 /* Varışlar: henüz gelmemiş bütün mallar, tahmini varışa göre aylara ayrılmış; altta son gelenler (tahmin ne kadar tuttu) */
 function sArrivals(){
@@ -284,10 +290,11 @@ function sArrivals(){
   for(const x of withE.filter(x=>etaDays(x.e)>=0)){ const m=String(x.e.date).slice(0,7); if(!months.has(m)) months.set(m,[]); months.get(m).push(x); }
   const mName=m=>`${MONTHS_TR[+m.slice(5,7)-1]} ${m.slice(0,4)}`;
   const recent=S.lots.filter(l=>inFirm(l)&&l.arriveDate&&l.loadDate&&daysSince(l.arriveDate)<=60).sort((a,b)=>String(b.arriveDate).localeCompare(String(a.arriveDate))).slice(0,10);
-  let body=!lots.length?`<div class="empty">Yolda ya da siparişte mal yok.</div>`:"";
+  let body=!lots.length&&!outShipments().length?`<div class="empty">Yolda ya da siparişte mal yok.</div>`:"";
   if(late.length) body+=`<h3 class="acch" style="color:var(--bad)">Gecikenler (geldiyse “Depoda” işaretle)</h3><div class="panel rows">${late.map(x=>row(x.l,x.e)).join("")}</div>`;
   for(const [m,xs] of months) body+=`<h3 class="acch">${mName(m)} <span class="muted" style="font-weight:400">· ${xs.length} alım</span></h3><div class="panel rows">${xs.map(x=>row(x.l,x.e)).join("")}</div>`;
   if(noE.length) body+=`<h3 class="acch">Varış tarihi hesaplanamayanlar</h3><div class="panel rows">${noE.map(l=>row(l,null)).join("")}</div>`;
+  const outs=outShipments(); if(outs.length) body+=`<h3 class="acch">Müşteriye giden sevkiyatlar</h3><div class="panel rows">${outs.map(shipRow).join("")}</div>`;
   if(recent.length) body+=`<details class="dmore"><summary>Son gelenler · tahmin ne kadar tuttu</summary><div class="panel rows">${recent.map(l=>{ const real=Math.round((Date.parse(l.arriveDate)-Date.parse(l.loadDate))/864e5);
     return `<button type="button" class="row" data-lot="${l.id}"><span class="main"><div class="t">${esc(lotProducts(l))} · ${esc(l.origin||"")}</div><div class="sub">yükleme ${fds(l.loadDate)} → geldi ${fds(l.arriveDate)}</div></span><span class="end"><div class="a">${real} gün</div><div class="b">gerçek yol süresi</div></span></button>`; }).join("")}</div></details>`;
   body+=`<p class="muted foot-note">“~” işaretli tarihler yükleme tarihi + ülkenin yol süresidir; sistem o ülkeden gelen her yeni malla bu süreyi kendi geçmişine göre düzeltir. Süreleri Ayarlar → Yol süreleri'nden değiştirebilirsin.</p>`;
@@ -386,14 +393,14 @@ function vSatislar(){
   if(!list.length) return h+`<div class="panel"><div class="empty">${tab==="kon"?"Konsinyede mal yok. Müşteriye satılmadan bırakılan malı <b>+ Konsinye gönderim</b> ile gir; satıldıkça satış sayfasından “Satıldı” dersin.":base.length?"Bu seçime uyan satış yok.":"Henüz satış yok. Bir alımdan satış yaptığında <b>+ Yeni satış</b> ile gir; o modelin stoğu otomatik düşer."}</div></div>`;
   if(tab==="kon"){
     h+=`<div class="panel"><div class="tablewrap"><table><thead><tr><th>Gönderim</th><th>Müşteri</th><th>Mallar</th><th class="r">Satıldı</th><th class="r">Bekliyor</th><th class="r">Durum</th></tr></thead><tbody>${list.map(s=>{ const c=SC(s), sold=konsSold(s), back=c.lines.reduce((a,x)=>a+(x.iade||0)+(x.lost||0),0), dd=daysSince(s.date);
-      return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(s.date)}</td><td class="tt">${esc(saleCustomer(s))}</td><td style="white-space:normal;min-width:200px">${esc(saleLinesTxt(s))}</td>
+      return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(s.date)}</td><td class="tt">${esc(saleCustomer(s))}${shipBadge(s)}</td><td style="white-space:normal;min-width:200px">${esc(saleLinesTxt(s))}</td>
         <td class="r">${sold>0.5?`${nf0.format(sold)} kg<br><span class="muted" style="font-size:12px">${usdf(c.revUSD)}</span>`:`<span class="muted">—</span>`}</td>
         <td class="r">${c.pendKg>0.5?`<b>${nf0.format(c.pendKg)} kg</b>`:`<span class="muted">—</span>`}${back>0.5?`<br><span class="muted" style="font-size:12px">${nf0.format(back)} kg geri/kayıp</span>`:""}</td>
         <td class="r">${c.pendKg>0.5?`<span style="color:${dd>30?"var(--warn)":"var(--muted)"}">${dd} gündür müşteride</span>`:`<span style="color:var(--good)">bitti ✓</span>`}</td></tr>`; }).join("")}</tbody></table></div></div>`;
     return h;
   }
   h+=`<div class="panel"><div class="tablewrap"><table><thead><tr><th>Tarih</th><th>Müşteri</th><th>Pazar</th><th>Mallar</th><th class="r">Tutar</th><th class="r">Kalan alacak</th></tr></thead><tbody>${list.map(s=>{const c=SC(s), k=s.realLater;
-    return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(dateOf(s))}</td><td class="tt">${esc(saleCustomer(s))}${c.olot?` <span class="badge">Ortak</span>`:""}${k?` <span class="badge">Konsinyeden</span>`:""}</td><td>${esc(MK[s.market]||"—")}</td>
+    return `<tr class="click" data-sale="${s.id}" tabindex="0"><td>${fd(dateOf(s))}</td><td class="tt">${esc(saleCustomer(s))}${c.olot?` <span class="badge">Ortak</span>`:""}${k?` <span class="badge">Konsinyeden</span>`:""}${shipBadge(s)}</td><td>${esc(MK[s.market]||"—")}</td>
       <td style="white-space:normal;min-width:200px">${esc(k?konsSoldTxt(s):saleLinesTxt(s))}${k&&c.pendKg>0.5?`<br><span class="muted" style="font-size:12px">${nf0.format(c.pendKg)} kg hâlâ konsinyede</span>`:""}</td>
       <td class="r">${k?usdf(c.revUSD):moneyf(c.tot,s.cur)}${!k&&s.cur==="TL"?`<br><span class="muted" style="font-size:12px">${usdf(c.totUSD)}</span>`:""}</td>
       <td class="r" style="color:${c.olot?"var(--muted)":c.due>1?"var(--warn)":"var(--good)"}">${c.olot?"Ortak hesabında":c.due>1?usdf(c.due):"Tahsil edildi"}</td></tr>`;}).join("")}</tbody></table></div></div>`;
@@ -678,7 +685,7 @@ function sLot(id){
   return {title:esc(l.code||"Alım"),body,foot};
 }
 const payRow = p => `<button type="button" class="row" data-pay="${p.id}"><span class="typeic ${p.dir==="out"?"o":"t"}">${p.dir==="out"?"ÖDE":"TAH"}</span><span class="main"><div class="t">${esc(p.kind||(p.dir==="out"?"Ödeme":"Tahsilat"))}</div><div class="sub">${fd(p.date)}${p.bank?" · "+esc(p.bank):p.method?" · "+esc(p.method):""}${docN(p)}</div></span><span class="end"><div class="a">${moneyf(+p.amount||0,p.cur)}</div>${p.cur==="TL"?`<div class="b">${usdf(usd(p.amount,p.cur,p.kur))}</div>`:""}</span></button>`;
-const saleRow = s => { const sc=SC(s); const k=s.realLater; return `<button type="button" class="row" data-sale="${s.id}"><span class="typeic ${k?"t":"s"}">${k?"KON":"SAT"}</span><span class="main"><div class="t">${esc(saleCustomer(s))} · ${esc(MK[s.market]||"")}${k?" · konsinye":""}</div><div class="sub">${fd(s.date)} · ${esc(saleLinesTxt(s))}${k?` · ${nf0.format(konsSold(s))} kg satıldı${sc.pendKg>0.5?`, ${nf0.format(sc.pendKg)} kg bekliyor`:""}`:""}</div></span><span class="end"><div class="a">${k?usdf(sc.revUSD):moneyf(sc.tot,s.cur)}</div><div class="b">${sc.olot?"ortak hesabında":sc.due>1?"kalan "+usdf(sc.due):"tahsil edildi"}</div></span></button>`; };
+const saleRow = s => { const sc=SC(s); const k=s.realLater; return `<button type="button" class="row" data-sale="${s.id}"><span class="typeic ${k?"t":"s"}">${k?"KON":"SAT"}</span><span class="main"><div class="t">${esc(saleCustomer(s))} · ${esc(MK[s.market]||"")}${k?" · konsinye":""}${shipBadge(s)}</div><div class="sub">${fd(s.date)} · ${esc(saleLinesTxt(s))}${k?` · ${nf0.format(konsSold(s))} kg satıldı${sc.pendKg>0.5?`, ${nf0.format(sc.pendKg)} kg bekliyor`:""}`:""}</div></span><span class="end"><div class="a">${k?usdf(sc.revUSD):moneyf(sc.tot,s.cur)}</div><div class="b">${sc.olot?"ortak hesabında":sc.due>1?"kalan "+usdf(sc.due):"tahsil edildi"}</div></span></button>`; };
 const expRows = es => es.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(x=>`<button type="button" class="row" data-exp="${x.id}"><span class="typeic m">MSR</span><span class="main"><div class="t">${esc(x.cat||"Masraf")}${x.paidBy==="ortak"?` <span class="badge">ortak ödedi</span>`:x.paidBy==="alici"?` <span class="badge">alıcı ödedi</span>`:""}</div><div class="sub">${fd(x.date)}${x.payee?" · "+esc(x.payee):""}${docN(x)}</div></span><span class="end"><div class="a">${moneyf(+x.amount||0,x.cur)}</div>${x.cur==="TL"?`<div class="b">${usdf(expUSD(x))}</div>`:""}</span></button>`).join("");
 
 /* --- satış detayı --- */
@@ -692,6 +699,7 @@ function sSale(id){
   const body=`<div class="dhead"><div class="code"><span>${fd(s.date)}</span><span class="pill" style="color:var(--firm-b)">${esc(MK[s.market]||"")}</span>${c.olot?`<span class="badge">Ortak alım satışı</span>`:""}${exBadge(s)}</div><div class="ttl">${esc(saleCustomer(s))}</div></div>
     <div class="panel rows">${rows}</div>
     ${retSec(s,c)}
+    ${shipSec(s)}
     ${c.olot?`<div class="fnote">Bu satış ortak alım <b>${esc(c.olot.code)}</b> hesabına işlenir. Ortaktan havale, ortağın ödediği masraf/vergi ve kapama ortak alımın sayfasından girilir. <button class="btn sm" type="button" data-lot="${c.olot.id}">${esc(c.olot.code)} ortak hesabını aç →</button></div>`:saleMoneyHTML(s,c)}
     ${kvHTML([["Firma",firmTag(s.firmId)],["Dolar karşılığı",usdf(c.totUSD)+(s.cur==="TL"?` (kur ${nf4.format(+s.kur||0)})`:"")],["Masraflar",c.exp?usdf(c.exp):"—"],["Belge no",esc(s.docNo||"—")],["Ödeme vadesi",s.dueDate?fd(s.dueDate)+(c.due>1&&!c.olot&&days(s.dueDate)<0?` <span style="color:var(--bad)">· ${-days(s.dueDate)} gün gecikti</span>`:""):"—"],["Araç / plaka",esc(s.plate||"—")]])}
     ${s.note?`<div class="note">${esc(s.note)}</div>`:""}
@@ -916,6 +924,50 @@ function isSatForm(id){
   onDelete:j.satis?async()=>{ await db.doc("isler/"+id).update({satis:null,updatedAt:new Date().toISOString(),updatedBy:me||null}); }:null,
   onSave:async x=>{ const ppk=(j.items||[]).map((it,i)=>+x["p_"+i]||0); if(ppk.some(p=>!(p>0))) return "Her ürünün ortalama satış fiyatını yaz.";
     await db.doc("isler/"+id).update({satis:{date:x.date,ppk,masraf:+x.masraf||0},updatedAt:new Date().toISOString(),updatedBy:me||null}); }});
+}
+/* ---------- satış sevkiyatı: müşteriye giden mal (Hazırlanıyor → Yüklendi → Yolda → Teslim edildi) ---------- */
+const SHIP_ST = [["hazir","Hazırlanıyor"],["yuklendi","Yüklendi"],["yolda","Yolda"],["teslim","Teslim edildi"]];
+const shipName = k => (SHIP_ST.find(x=>x[0]===k)||[,""])[1];
+const shipEta = s => C.eta.get("s:"+s.id)||null;
+const shipBadge = s => !s.ship?"":s.ship.status==="teslim"?` <span class="badge" style="color:var(--good)">Teslim ✓</span>`:` <span class="badge">${shipName(s.ship.status)}</span>`;
+function shipSec(s){
+  const W=canWrite&&db, sh=s.ship;
+  if(!sh) return W?`<div class="dsec"><div class="h"><h4>Sevkiyat</h4><button class="btn sm" type="button" data-act="ship-edit" data-id="${s.id}">Sevkiyatı takip et</button></div></div>`:"";
+  const si=SHIP_ST.findIndex(x=>x[0]===sh.status), next=SHIP_ST[si+1], e=shipEta(s);
+  const dOf={yuklendi:sh.loadDate,teslim:sh.deliveredDate};
+  const steps=`<div class="stepper" style="--sc:${sh.status==="teslim"?"var(--good)":"var(--accent)"};margin-bottom:10px">${SHIP_ST.map(([k,t2],i)=>`<button type="button" class="step ${i<=si?"done":""} ${i===si?"cur":""}" ${W?`data-act="ship-edit" data-id="${s.id}" data-st="${k}"`:"disabled"} aria-label="${t2}"><i></i><span>${t2}</span><small>${dOf[k]?fds(dOf[k]):""}</small></button>`).join("")}</div>`;
+  const tir=sh.transport!=="gemi";
+  const kv=[["Taşıma",tir?"TIR / kara yolu":"Gemi"],[tir?"Nakliye firması":"Gemi firması",esc((tir?sh.trucker:sh.carrier)||"—")],
+    ...(tir?[["Plaka",esc((sh.plates||[]).join(", ")||"—")],["CMR",esc(sh.cmr||"—")]]:[["Konteyner",esc((sh.cntNos||[]).join(", ")||"—")],["Konşimento",esc(sh.bl||"—")]]),
+    ["Yükleme",sh.loadDate?fd(sh.loadDate):"—"],
+    sh.status==="teslim"?["Teslim",fd(sh.deliveredDate)+(sh.loadDate&&sh.deliveredDate?` <span class="muted">(${Math.round((Date.parse(sh.deliveredDate)-Date.parse(sh.loadDate))/864e5)} gün)</span>`:"")]:["Tahmini teslim",e?etaTxt(e).replace("yükleme +","yükleme +"):"—"]];
+  return `<div class="dsec"><div class="h"><h4>Sevkiyat</h4>${W&&next?`<button class="btn sm pri" type="button" data-act="ship-edit" data-id="${s.id}" data-st="${next[0]}">${next[1]} →</button>`:""}${W?`<button class="btn sm" type="button" data-act="ship-edit" data-id="${s.id}">Düzenle</button>`:""}</div>
+    ${steps}${kvHTML(kv)}${sh.note?`<div class="note">${esc(sh.note)}</div>`:""}</div>`;
+}
+function shipForm(id,st){
+  const s=saleById(id); if(!s) return; const sh=s.ship||{};
+  const v={status:st||sh.status||"hazir",transport:sh.transport||"tir",trucker:sh.trucker||"",plates:(sh.plates||[]).length?sh.plates:[""],cmr:sh.cmr||"",carrier:sh.carrier||"",cntNos:(sh.cntNos||[]).length?sh.cntNos:[""],bl:sh.bl||"",
+    loadDate:sh.loadDate||((st==="yuklendi"||st==="yolda")?today():""),eta:sh.eta||"",deliveredDate:sh.deliveredDate||(st==="teslim"?today():""),note:sh.note||""};
+  openForm({title:`Sevkiyat · ${saleCustomer(s)}`,values:v,docTarget:{col:"sales",id},docKind:"CMR / taşıma belgesi",fields:[
+    {k:"status",label:"Durum",type:"seg",options:SHIP_ST},
+    {k:"transport",label:"Taşıma",type:"seg",options:[["tir","TIR"],["gemi","Gemi"]],half:true},
+    {k:"trucker",label:"Nakliye firması",half:true,showIf:x=>x.transport!=="gemi",list:()=>uniq([...S.lots.map(z=>z.trucker),...S.sales.map(z=>z.ship?.trucker)])},
+    {k:"carrier",label:"Gemi firması",half:true,showIf:x=>x.transport==="gemi",list:()=>uniq([...lists("carriers"),...S.lots.map(z=>z.carrier)])},
+    {k:"plates",type:"list",label:"TIR plakası",addLabel:"Plaka ekle",ph:"34 ABC 123",showIf:x=>x.transport!=="gemi"},
+    {k:"cmr",label:"CMR no",half:true,showIf:x=>x.transport!=="gemi"},
+    {k:"cntNos",type:"list",label:"Konteyner no",addLabel:"Konteyner ekle",showIf:x=>x.transport==="gemi"},
+    {k:"bl",label:"Konşimento (B/L)",half:true,showIf:x=>x.transport==="gemi"},
+    {k:"loadDate",label:"Yükleme tarihi",type:"date",half:true},
+    {k:"eta",label:"Tahmini teslim (biliyorsan)",type:"date",half:true,showIf:x=>x.status!=="teslim",hint:" "},
+    {k:"deliveredDate",label:"Teslim tarihi",type:"date",half:true,showIf:x=>x.status==="teslim",req:true},
+    {k:"note",label:"Not",ph:"Gümrük, sınır kapısı…"}],
+  onChange:(x,f)=>{ const h=f.querySelector('[data-f="eta"] .hint'); if(!h) return; const e=CALC.saleEtaOf(S,{...s,ship:{...x,eta:""}});
+    h.textContent=e?`Boş bırakırsan: ~${fd(e.date)} (yükleme + ${e.days} gün, ${e.basis==="gecmis"?`geçmiş ${e.n} sevkiyatın ortası`:"ortalama süre"})`:"Yükleme tarihi girilince kendisi hesaplar"; },
+  onSave:async x=>{
+    const ship={status:x.status,transport:x.transport==="gemi"?"gemi":"tir",trucker:(x.trucker||"").trim(),plates:(x.plates||[]).map(p=>p.trim().toUpperCase()).filter(Boolean),cmr:(x.cmr||"").trim().toUpperCase(),
+      carrier:x.carrier||"",cntNos:(x.cntNos||[]).map(p=>p.trim().toUpperCase()).filter(Boolean),bl:(x.bl||"").toUpperCase(),loadDate:x.loadDate||"",eta:x.status==="teslim"?"":(x.eta||""),deliveredDate:x.status==="teslim"?x.deliveredDate:"",note:x.note||""};
+    await db.doc("sales/"+id).update({ship,updatedAt:new Date().toISOString(),updatedBy:me||null});
+  }});
 }
 /* ---------- maliyet dökümü: bir alım kaleminin kg başı son maliyeti, kalem kalem ---------- */
 function sCostB(top){
@@ -3123,7 +3175,7 @@ document.addEventListener("click",e=>{
       "mfa-off":()=>armDel(t,async()=>{ await window.__mfa.remove(t.dataset.id); const top=S.stack[S.stack.length-1]; top.list=null; mfaLoad(top); }),
       "q-flush":()=>{ window.__queue?.flush().then(netBar); },
       "arrivals":()=>openSheet({type:"arrivals"}),
-      "bal-open":()=>openingForm(), "set-transit":()=>transitForm(),
+      "bal-open":()=>openingForm(), "ship-edit":()=>shipForm(d.id,d.st), "set-transit":()=>transitForm(),
       "new-is":()=>isForm(null), "is-open":()=>openSheet({type:"is",id:d.id}), "is-edit":()=>isForm(isById(d.id)), "is-sat":()=>isSatForm(d.id), "is-ver":()=>isMoneyForm(d.id,"ver"), "is-don":()=>isMoneyForm(d.id,"don"),
       "sat-tab":()=>{ S.satv=d.k; S.market="all"; render(); },
       "hist-all":()=>{ openSheet({type:"hist"}); loadHist(S.stack[S.stack.length-1]); },

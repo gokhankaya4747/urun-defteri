@@ -55,6 +55,20 @@ const CALC = (() => {
     const t = transitDays(D, l.origin, trKey(l), l.dest === "irak" ? "irak" : "mersin", l.id);
     return t ? { date: addDays(l.loadDate, t.days), auto: true, ...t } : null;
   }
+  /* Satış sevkiyatı (müşteriye giden mal): elle tahmini teslim > aynı pazar+taşımadan en az 2 teslim edilmiş sevkiyatın ortası > varsayılan */
+  const SALE_TRANSIT = { irak: { tir: 6, gemi: 25 }, ic: { tir: 2, gemi: 5 }, diger: { tir: 10, gemi: 25 } };
+  function saleEtaOf(D, s) {
+    const sh = s.ship; if (!sh || sh.status === "teslim") return null;
+    if (sh.eta) return { date: sh.eta, auto: false };
+    if (!sh.loadDate) return null;
+    const tr = sh.transport === "gemi" ? "gemi" : "tir", mk = SALE_TRANSIT[s.market] ? s.market : "diger";
+    const hist = (D.sales || []).filter((x) => x.id !== s.id && x.ship?.loadDate && x.ship?.deliveredDate && (x.market || "diger") === mk && (x.ship.transport === "gemi" ? "gemi" : "tir") === tr)
+      .map((x) => daysBetween(x.ship.loadDate, x.ship.deliveredDate)).filter((n) => n >= 0 && n < 120).sort((a, b) => a - b);
+    let days, basis, n;
+    if (hist.length >= 2) { const m = hist.length >> 1; days = hist.length % 2 ? hist[m] : Math.round((hist[m - 1] + hist[m]) / 2); basis = "gecmis"; n = hist.length; }
+    else { days = SALE_TRANSIT[mk][tr]; basis = "varsayilan"; }
+    return { date: addDays(sh.loadDate, days), auto: true, days, basis, n };
+  }
   const costAt = (ci, loc) => (loc === "irak" ? landedIrakOf(ci) : landedOf(ci));
 
   /* kapama: elden USD nakit (out) alıcıya/ortağa verilir, çarşıda dinara bozulur (cRate). Bu dinarın bir kısmı bankaya yatırılıp
@@ -211,6 +225,7 @@ const CALC = (() => {
       ci.finalCost = net > 0 ? (ci.kgIn * landedOf(ci) + (ci.sevkExp || 0) - (ci.credAmt || 0) + ci.saleExp - ci.saleKur) / net : landedOf(ci);
     }
     const eta = new Map(); for (const l of lots) if (l.status !== "depoda" && l.status !== "kapandi") { const e = etaOf(D, l); if (e) eta.set(l.id, e); }
+    for (const s of sales) { const e = saleEtaOf(D, s); if (e) eta.set("s:" + s.id, e); }
     return { item, lot, sale, is, eta, events, unalloc, payUSD };
   }
 
@@ -269,7 +284,8 @@ const CALC = (() => {
         "Faturadaki kg": +L.ln.kg || 0, "Fatura fiyatı /kg": !s.realLater && +L.ln.invPpk > 0 ? +L.ln.invPpk : L.ln.ppk, "Gerçek fiyat /kg": s.realLater ? (L.soldKg ? r4(L.amtUSD / L.soldKg) : "") : L.ln.ppk, "Para birimi": s.cur, "Kur": s.cur === "TL" ? s.kur : "", "Fatura tutarı USD": r2(L.offUSD),
         "Satılan kg": r2(L.soldKg), "İade kg": r2(L.iade), "Kayıp kg": r2(L.lost), "Konsinyede bekleyen kg": r2(L.pend), "Gerçek satış USD": r2(L.amtUSD),
         "Malın maliyeti USD": r2(g("cogs")), "Satış masrafı payı USD": r2(g("exp")), "Kur farkı payı USD": r2(g("kur") - g("kes")), "Kayıp USD": r2(g("loss")), "Kâr USD": r2(profit),
-        "Belge no": s.docNo || s.ciNo || "", "Plaka": s.plate || "", "Not": s.note || "" }; }); });
+        "Sevkiyat": s.ship ? ({ hazir: "Hazırlanıyor", yuklendi: "Yüklendi", yolda: "Yolda", teslim: "Teslim edildi" })[s.ship.status] || "" : "", "Yükleme": s.ship?.loadDate || "", "Tahmini teslim": R.eta?.get("s:" + s.id)?.date || "", "Teslim": s.ship?.deliveredDate || "",
+        "Belge no": s.docNo || s.ciNo || "", "Plaka": (s.ship?.plates || []).join(", ") || s.plate || "", "Not": s.note || "" }; }); });
     // satış başına para durumu (tahsilat bir kere yazılır)
     out["Satış tahsilatları"] = sales.filter((s) => !R.sale.get(s.id).olot).map((s) => { const c = R.sale.get(s.id);
       return { "Tarih": s.date, "Firma": H.firm(s.firmId), "Müşteri": cust(s), "Fatura USD": r2(c.totUSD), "İade faturası USD": r2(c.offRetUSD), "Gerçek satış USD": r2(c.revUSD), "Tahsil USD": r2(c.got), "Cariden düşülen USD": r2(c.alloc),
@@ -333,5 +349,5 @@ const CALC = (() => {
     return { ci, lines, totalCost, kgIn: ci.kgIn, fireKg, supRetKg, lostKg, sellKg, perKg: sellKg > 0 ? totalCost / sellKg : null, soldKg, rev, avgPrice: soldKg > 0 ? rev / soldKg : null, stockKg: itemStock(ci) + (ci.konsKg || 0) };
   }
 
-  return { compute, partyBalances, sheets, costBreakdown, transitDays, etaOf, DEF_TRANSIT, kapCalc, kapSum, itemStock, irakLeft, hereLeft, landedOf, landedIrakOf, isCashPay, usd, sum };
+  return { compute, partyBalances, sheets, costBreakdown, transitDays, etaOf, saleEtaOf, SALE_TRANSIT, DEF_TRANSIT, kapCalc, kapSum, itemStock, irakLeft, hereLeft, landedOf, landedIrakOf, isCashPay, usd, sum };
 })();

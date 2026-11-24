@@ -203,6 +203,16 @@ T("normal satışta farklı fatura fiyatı: kâr ve alacak gerçek fiyattan, res
   invariants(D, R, "fatura-farkı");
 });
 
+T("satış sevkiyatı tahmini teslim: elle > geçmiş > varsayılan", () => {
+  const D = base(); const s = sale(D, "ex-sa1"); s.ship = { status: "yolda", transport: "tir", loadDate: "2026-11-23" };
+  let e = CALC.saleEtaOf(D, s); assert.equal(e.date, "2026-11-29", "Irak TIR varsayılan 6 gün"); assert.equal(e.basis, "varsayilan");
+  sale(D, "ex-sa3").ship = { status: "teslim", transport: "tir", loadDate: "2026-09-28", deliveredDate: "2026-10-02" };
+  D.sales.push({ id: "z", market: "irak", items: [], ship: { status: "teslim", transport: "tir", loadDate: "2026-10-01", deliveredDate: "2026-10-05" } });
+  e = CALC.saleEtaOf(D, s); assert.equal(e.basis, "gecmis"); assert.equal(e.days, 4);
+  s.ship.eta = "2026-11-25"; assert.equal(CALC.saleEtaOf(D, s).auto, false);
+  s.ship.status = "teslim"; assert.equal(CALC.saleEtaOf(D, s), null);
+});
+
 T("Excel sayfaları = olaylar (Kâr hareketleri toplamı)", () => {
   const D = base(), R = CALC.compute(D);
   const SH = CALC.sheets(D, R, { firm: (x) => x, party: (i, f) => f || i, prod: (it) => it.productId, stage: (l) => l.status });
